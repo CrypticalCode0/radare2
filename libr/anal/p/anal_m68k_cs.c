@@ -212,13 +212,13 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len) {
 	case M68K_INS_ASR:
 		op->type  = R_ANAL_OP_TYPE_SHR;
 		break;
-	case M68K_INS_ABCD:
+	case M68K_INS_ABCD: //should be an subsection of R_ANAL_OP_TYPE_ADD
 		break;
 	case M68K_INS_BHS:
 	case M68K_INS_BLO:
 	case M68K_INS_BHI:
 	case M68K_INS_BLS:
-	case M68K_INS_BCC:
+	case M68K_INS_BCC: 
 	case M68K_INS_BCS:
 	case M68K_INS_BNE:
 	case M68K_INS_BEQ:
@@ -251,7 +251,7 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len) {
 	case M68K_INS_BSR:
 		op->type = R_ANAL_OP_TYPE_CALL;
 		op->jump = IMM(0);
-		op->fail = addr + 2;
+		op->fail = addr + 2; //this should never occure because this would be resolved at compile time.
 		break;
 	case M68K_INS_BCHG:
 	case M68K_INS_BCLR:
@@ -265,7 +265,10 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len) {
 	case M68K_INS_BFINS:
 	case M68K_INS_BFSET:
 	case M68K_INS_BFTST:
+		break;
 	case M68K_INS_BKPT:
+		op->type = R_ANAL_OP_TYPE_ILL;
+		break;
 	case M68K_INS_CALLM:
 	case M68K_INS_CAS:
 	case M68K_INS_CAS2:
@@ -293,7 +296,7 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len) {
 	case M68K_INS_DBF:
 	case M68K_INS_DBHI:
 	case M68K_INS_DBLS:
-	case M68K_INS_DBCC:
+	case M68K_INS_DBCC: 
 	case M68K_INS_DBCS:
 	case M68K_INS_DBNE:
 	case M68K_INS_DBEQ:
@@ -317,8 +320,8 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len) {
 	case M68K_INS_EORI:
 		op->type = R_ANAL_OP_TYPE_XOR;
 		break;
-	case M68K_INS_EXG:
-	case M68K_INS_EXT:
+	case M68K_INS_EXG: //this is an RegN to RegN Move.l
+	case M68K_INS_EXT: 
 	case M68K_INS_EXTB:
 		break;
 	case M68K_INS_FABS:
@@ -571,7 +574,7 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len) {
 	case M68K_INS_ORI:
 		op->type = R_ANAL_OP_TYPE_OR;
 		break;
-	case M68K_INS_PACK:
+	case M68K_INS_PACK: //should be handled in R_ANAL_OP_TYPE_MOV, like UNPK
 	case M68K_INS_PFLUSH:
 	case M68K_INS_PFLUSHA:
 	case M68K_INS_PFLUSHAN:
@@ -605,7 +608,7 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len) {
 	case M68K_INS_RTS:
 		op->type = R_ANAL_OP_TYPE_RET;
 		break;
-	case M68K_INS_SBCD:
+	case M68K_INS_SBCD: //should be an subsection of R_ANAL_OP_TYPE_SUB
 	case M68K_INS_ST:
 	case M68K_INS_SF:
 	case M68K_INS_SHI:
