@@ -39,6 +39,9 @@ static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 	}
 
 	// replace this with the asm.features?
+	if (a->cpu && strstr (a->cpu, "68008")) {
+		mode |= CS_MODE_M68K_000;
+	}
 	if (a->cpu && strstr (a->cpu, "68000")) {
 		mode |= CS_MODE_M68K_000;
 	}
