@@ -18,7 +18,7 @@
 #if CAPSTONE_HAS_M68K
 
 // Size of the longest instruction in bytes
-#define M68K_LONGEST_INSTRUCTION 10
+#define M68K_LONGEST_INSTRUCTION 11 //MOVE.L ([bd,An,Xn]od),([bd,An,Xn]od); this instruction can be up to 11 words, you can get more data on the bust but not instruction size.
 
 static bool check_features(RAsm *a, cs_insn *insn);
 static csh cd = 0;
