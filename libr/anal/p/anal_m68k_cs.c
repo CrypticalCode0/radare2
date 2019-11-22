@@ -288,7 +288,10 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_BFINS:
 	case M68K_INS_BFSET:
 	case M68K_INS_BFTST:
+		break;
 	case M68K_INS_BKPT: //break point
+		op->type = R_ANAL_OP_TYPE_ILL; //should TRAP to illegal instruction
+		break;
 	case M68K_INS_CALLM: //call module 68020 only instruction
 	case M68K_INS_CAS:
 	case M68K_INS_CAS2:
