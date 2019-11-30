@@ -1825,7 +1825,7 @@ static int cmd_tasks(void *data, const char *input) {
 		}
 		int tid = r_num_math (core->num, input + 1);
 		if (tid) {
-			r_core_task_break (core, tid);
+			r_core_task_break (&core->tasks, tid);
 		}
 		break;
 	}
@@ -1835,14 +1835,14 @@ static int cmd_tasks(void *data, const char *input) {
 			return 0;
 		}
 		int tid = r_num_math (core->num, input + 1);
-		r_core_task_join (core, core->current_task, tid ? tid : -1);
+		r_core_task_join (&core->tasks, core->tasks.current_task, tid ? tid : -1);
 		break;
 	}
 	case '=': { // "&="
 		// r_core_task_list (core, '=');
 		int tid = r_num_math (core->num, input + 1);
 		if (tid) {
-			RCoreTask *task = r_core_task_get_incref (core, tid);
+			RCoreTask *task = r_core_task_get_incref (&core->tasks, tid);
 			if (task) {
 				if (task->res) {
 					r_cons_println (task->res);
@@ -1860,9 +1860,9 @@ static int cmd_tasks(void *data, const char *input) {
 			return 0;
 		}
 		if (input[1] == '*') {
-			r_core_task_del_all_done (core);
+			r_core_task_del_all_done (&core->tasks);
 		} else {
-			r_core_task_del (core, r_num_math (core->num, input + 1));
+			r_core_task_del (&core->tasks, r_num_math (core->num, input + 1));
 		}
 		break;
 	case '?': // "&?"
@@ -1881,7 +1881,7 @@ static int cmd_tasks(void *data, const char *input) {
 			break;
 		}
 		task->transient = input[0] == 't';
-		r_core_task_enqueue (core, task);
+		r_core_task_enqueue (&core->tasks, task);
 		break;
 	}
 	}
@@ -4307,6 +4307,7 @@ R_API int r_core_cmd_foreach(RCore *core, const char *cmd, char *each) {
 					r_cons_pop ();
 					r_cons_strcat (buf);
 					free (buf);
+					r_core_task_yield (&core->tasks);
 				}
 
 				r_list_free (match_flag_items);
@@ -4554,15 +4555,6 @@ R_API int r_core_cmd(RCore *core, const char *cstr, int log) {
 	free (ocmd);
 	return ret;
 beach:
-	if (r_list_empty (core->tasks)) {
-		r_th_lock_leave (core->lock);
-	} else {
-		RListIter *iter;
-		RCoreTask *task;
-		r_list_foreach (core->tasks, iter, task) {
-			r_th_pause (task->thread, false);
-		}
-	}
 	/* run pending analysis commands */
 	run_pending_anal (core);
 	return ret;
@@ -4606,11 +4598,13 @@ R_API int r_core_cmd_lines(RCore *core, const char *lines) {
 				break;
 			}
 			data = nl + 1;
+			r_core_task_yield (&core->tasks);
 		} while ((nl = strchr (data, '\n')));
 		r_cons_break_pop ();
 	}
 	if (ret >= 0 && data && *data) {
 		r_core_cmd (core, data, 0);
+		r_core_task_yield (&core->tasks);
 	}
 	free (odata);
 	return ret;
@@ -4849,7 +4843,7 @@ R_API void r_core_cmd_repeat(RCore *core, int next) {
 
 /* run cmd in the main task synchronously */
 R_API int r_core_cmd_task_sync(RCore *core, const char *cmd, bool log) {
-	RCoreTask *task = core->main_task;
+	RCoreTask *task = core->tasks.main_task;
 	char *s = strdup (cmd);
 	if (!s) {
 		return 0;
@@ -4857,7 +4851,7 @@ R_API int r_core_cmd_task_sync(RCore *core, const char *cmd, bool log) {
 	task->cmd = s;
 	task->cmd_log = log;
 	task->state = R_CORE_TASK_STATE_BEFORE_START;
-	int res = r_core_task_run_sync (core, task);
+	int res = r_core_task_run_sync (&core->tasks, task);
 	free (s);
 	return res;
 }

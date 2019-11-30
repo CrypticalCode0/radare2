@@ -874,6 +874,11 @@ static bool cb_asmparser(void *user, void *data) {
 	return r_parse_use (core->parser, node->value);
 }
 
+typedef struct {
+	const char *name;
+	const char *aliases;
+} namealiases_pair;
+
 static bool cb_binstrenc (void *user, void *data) {
 	RConfigNode *node = (RConfigNode *)data;
 	if (node->value[0] == '?') {
@@ -883,7 +888,32 @@ static bool cb_binstrenc (void *user, void *data) {
 		               "if utf8 char detected then utf8 else latin1\n");
 		return false;
 	}
-	return true;
+	const namealiases_pair names[] = {
+		{ "guess", NULL },
+		{ "latin1", NULL },
+		{ "utf8", "utf-8" },
+		{ "utf16le", "utf-16le,utf16-le" },
+		{ "utf32le", "utf-32le,utf32-le" },
+		{ "utf16be", "utf-16be,utf16-be" },
+		{ "utf32be", "utf-32be,utf32-be" } };
+	int i;
+	char *enc = strdup (node->value);
+	if (!enc) {
+		return false;
+	}
+	r_str_case (enc, false);
+	for (i = 0; i < R_ARRAY_SIZE (names); i++) {
+		const namealiases_pair *pair = &names[i];
+		if (!strcmp (pair->name, enc) || r_str_cmp_list (pair->aliases, enc, ',')) {
+			free (node->value);
+			node->value = strdup (pair->name);
+			free (enc);
+			return true;
+		}
+	}
+	eprintf ("Unknown encoding: %s\n", node->value);
+	free (enc);
+	return false;
 }
 
 static bool cb_binfilter(void *user, void *data) {
@@ -2224,6 +2254,14 @@ static bool cb_seggrn(void *user, void *data) {
 	return true;
 }
 
+static bool cb_cmtoff(void *user, void *data) {
+	RConfigNode *node = (RConfigNode *) data;
+	if (node->i_value || r_str_is_false (node->value)) {
+		free (node->value);
+		node->value = strdup (r_str_bool (node->i_value));
+	}
+	return true;
+}
 
 static bool cb_stopthreads(void *user, void *data) {
 	RCore *core = (RCore *) user;
@@ -3093,7 +3131,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF ("asm.marks", "true", "Show marks before the disassembly");
 	SETPREF ("asm.cmt.refs", "false", "Show flag and comments from refs in disasm");
 	SETPREF ("asm.cmt.patch", "false", "Show patch comments in disasm");
-	SETPREF ("asm.cmt.off", "nodup", "Show offset comment in disasm (true, false, nodup)");
+	SETCB ("asm.cmt.off", "nodup", &cb_cmtoff, "Show offset comment in disasm (true, false, nodup)");
 	SETPREF ("asm.payloads", "false", "Show payload bytes in disasm");
 
 	/* bin */
