@@ -30,38 +30,57 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		char *str;
 		int max_operands;
 	} ops[] = {
-		{ "move",  "2 = 1", 2},
-		{ "movea",  "2 = 1", 2},
-		{ "moveq",  "2 = 1", 2},
-		{ "movem",  "2 = 1", 2},
-		{ "lea",  "2 = 1", 2},
-		{ "bsr",  "1()", 1},
-		{ "jsr",  "1()", 1},
-		{ "beq",  "if (==) jmp 1", 1},
-		{ "blt",  "if (<) jmp 1", 1},
-		{ "ble",  "if (<=) jmp 1", 1},
-		{ "bgt",  "if (>) jmp 1", 1},
-		{ "bge",  "if (>=) jmp 1", 1},
-		{ "bcs",  "if (cs) jmp 1", 1},
-		{ "bcc",  "if (cc) jmp 1", 1},
-		{ "bra",  "jmp 1", 1},
-		{ "jmp",  "jmp 1", 1},
-		{ "rts",  "ret", 2},
-		{ "btst",  "1 == 2", 2},
-		{ "cmp",  "1 == 2", 2},
-		{ "cmpi",  "2 == 1", 2},
-		{ "add",  "1 += 2", 2},
-		{ "addi",  "1 += 2", 2},
-		{ "adda",  "1 += 2", 2},
-		{ "sub",  "1 += 2", 2},
-		{ "subq",  "1 += 2", 2},
-		{ "tst",  "1 == 2", 2},
+		{ "move",  "1 -> 2", 2},
+		{ "movea",  "1 -> 2", 2},
+		{ "moveq",  "N -> 2", 2},
+		{ "movem",  "<list> -> 2", 2},
+		{ "lea",  "1 -> 2", 2}, //<ea>->An
+		{ "bsr",  "1()", 1}, //sp-4->sp; pc->(sp);pc+displacement->pc
+		{ "jsr",  "1()", 1}, //sp-4->sp; pc->(sp);<ea>->pc
+		{ "beq",  "if (==) jmp 1", 1}, //if Z flag true;then pc+displacement->pc
+		{ "bne",  "if != jmp 1", 1}, //if Z flag false;then pc+displacement->pc
+		{ "blt",  "if (<) jmp 1", 1}, //if N && !V || !N && V;then pc+displacement->pc
+		{ "ble",  "if (<=) jmp 1", 1}, //if Z || N && !V || !N && V;then pc+displacement->pc
+		{ "bgt",  "if (>) jmp 1", 1}, //if N && V && !Z || !N && !V && !Z;then cp+displacement->pc
+		{ "bge",  "if (>=) jmp 1", 1}, //if N && V || !N && !V;then pc->displacement->pc
+		{ "bcs",  "if (cs) jmp 1", 1}, //if C flag true; then pc+displacement->pc
+		{ "bcc",  "if (cc) jmp 1", 1}, //if C flag false; then pc+displacement->pc
+		{ "bvs",  "if (vs) jmp 1", 1}, //if V flag true;then pc+displacement->pc
+		{ "bvc",  "if (vc) jmp 1", 1}, //if V flag false;then pc+displacement->pc
+		{ "bpl",  "if (pl) jmp 1", 1}, //if N flag false;then pc+displacement->pc
+		{ "bmi",  "if (mi) jmp 1", 1}, //if N flag true;then pc+displacement->pc
+		{ "bhi",  "if (hi) jmp 1", 1}, //if !Z && !C;then pc+displacement->pc
+		{ "bls",  "if (ls) jmp 1", 1}, //if Z || C;then pc+displacement->pc
+		{ "bra",  "jmp 1", 1}, //pc+displacement->pc
+		{ "jmp",  "jmp 1", 1}, //<ea>->pc
+		{ "rts",  "ret", 0},   //(sp)->pc;sp+4->sp
+		{ "bchg",  "1 != 2", 2}, //test (<bit N> of dest)->Z flag;test (<bit N> of dest)-><bit N> of dest
+		{ "bclr",  "0x0->(1 >> 2)", 2}, //test (<bit N> of dest)->Z flag;0x0-><bit N> of dest
+		{ "",  "", },
+		{ "btst", "1 == 2", 2}, //test (<bit N> of dest)->Z flag
+		{ "cmp",  "1 == 2", 2}, //src-dest->ccr register
+		{ "cmpi", "N == 2", 2}, //src-imm->ccr register
+		{ "add",  "1 += 2", 2}, //src+dest->dest
+		{ "addi", "N += 2", 2}, //imm+dest->dest
+		{ "adda", "1 += 2", 2}, //src+An->An
+		{ "addq", "N += 2", 2}, //imm+dest->dest
+		{ "addx", "1 += 2+X", 2}, //src+dest+X flag->dest
+		{ "sub",  "1 -= 2", 2}, //src-dest->dest
+		{ "subi", "N -= 2", 2}, //imm+dest->dest
+		{ "suba", "1 -= 2", 2}, //src+An->An
+		{ "subq", "N -= 2", 2}, //imm+dest->dest
+		{ "subx", "1-X -= 2", 2}, //dest-src-X flag->dest
+		{ "tst",  "1 == NULL", 1}, //dest==0x0->ccr register
 		{ "ori",  "2 |= 1", 2},
-		{ "or",  "2 |= 1", 2},
+		{ "or",   "2 |= 1", 2},
 		{ "lsr",  "2 >>= 1", 2},
 		{ "lsl",  "2 <<= 1", 2},
-		{ "andi",  "2 &= 1", 2},
-		{ "nop",  ""},
+		{ "and",  "1 &= 2", 2}, //src&&dest->dest
+		{ "andi", "N &= 2", 2}, //imm&&dest->dest
+		{ "andi to ccr", "N &= ccr", 1}, //imm&&ccr->ccr
+		{ "asl",  "2 <<= 1", 2}, //dest shifted by count->dest
+		{ "asr",  "2 >>= 1", 2}, //dest shifted by count->dest
+		{ "nop",  "nop", 0},
 //
 		{ NULL }
 	};
