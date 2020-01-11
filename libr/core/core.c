@@ -259,7 +259,7 @@ static char *getNameDelta(RCore *core, ut64 addr) {
 }
 
 static void archbits(RCore *core, ut64 addr) {
-	r_core_seek_archbits (core, addr);
+	r_core_seek_arch_bits (core, addr);
 }
 
 static int cfggeti(RCore *core, const char *k) {
@@ -272,6 +272,37 @@ static const char *cfgget(RCore *core, const char *k) {
 
 static ut64 numget(RCore *core, const char *k) {
 	return r_num_math (core->num, k);
+}
+
+static bool __isMapped(RCore *core, ut64 addr, int perm) {
+	if (r_config_get_i (core->config, "cfg.debug")) {
+		// RList *maps = core->dbg->maps;
+		RDebugMap *map = NULL;
+		RListIter *iter = NULL;
+
+		r_list_foreach (core->dbg->maps, iter, map) {
+			if (addr >= map->addr && addr < map->addr_end) {
+				if (perm > 0) {
+					if (map->perm & perm) {
+						return true;
+					}
+				} else {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	return r_io_map_is_mapped (core->io, addr);
+}
+
+static int __syncDebugMaps(RCore *core) {
+	if (r_config_get_i (core->config, "cfg.debug")) {
+		return r_debug_map_sync (core->dbg);
+	}
+	return 0;
 }
 
 R_API int r_core_bind(RCore *core, RCoreBind *bnd) {
@@ -290,6 +321,8 @@ R_API int r_core_bind(RCore *core, RCoreBind *bnd) {
 	bnd->cfggeti = (RCoreConfigGetI)cfggeti;
 	bnd->cfgGet = (RCoreConfigGet)cfgget;
 	bnd->numGet = (RCoreNumGet)numget;
+	bnd->isMapped = (RCoreIsMapped)__isMapped;
+	bnd->syncDebugMaps = (RCoreDebugMapsSync)__syncDebugMaps;
 	return true;
 }
 
@@ -696,7 +729,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 				}
 				*ptr = '\0';
 				RFlagItem *flag = r_flag_get (core->flags, bptr);
-				ret = flag? flag->size: 0LL; // flag 
+				ret = flag? flag->size: 0LL; // flag
 				free (bptr);
 				free (out);
 				return ret;
@@ -1065,7 +1098,7 @@ static void autocomplete_ms_path(RLineCompletion *completion, RCore *core, const
 		*p = 0;
 		if (p == lpath) { // /xxx
 			dirname  = r_str_new ("/");
-		} else if (lpath[0] == '.') { // ./xxx/yyy 
+		} else if (lpath[0] == '.') { // ./xxx/yyy
 			dirname = r_str_newf ("%s%s", pwd, R_SYS_DIR);
 		} else if (lpath[0] == '/') { // /xxx/yyy
       			dirname = r_str_newf ("%s%s", lpath, R_SYS_DIR);
@@ -1235,6 +1268,7 @@ static void autocompleteFilename(RLineCompletion *completion, RLineBuffer *buf, 
 			break;
 		}
 		autocomplete_process_path (completion, buf->data, s);
+		free (s);
 	}
 out:
 	free (args);
@@ -1372,6 +1406,7 @@ static void autocomplete_flags(RCore *core, RLineCompletion *completion, const c
 	r_flag_foreach_prefix (core->flags, str, n, add_argv, completion);
 }
 
+// TODO: Should be refactored
 static void autocomplete_sdb (RCore *core, RLineCompletion *completion, const char *str) {
 	r_return_if_fail (core && completion && str);
 	char *pipe = strchr (str, '>');
@@ -1383,11 +1418,11 @@ static void autocomplete_sdb (RCore *core, RLineCompletion *completion, const ch
 		str = r_str_trim_ro (pipe + 1);
 	}
 	lpath = r_str_new (str);
-	p1 = strstr (lpath, "/");
+	p1 = strchr (lpath, '/');
 	if (p1) {
 		*p1 = 0;
 		char *ns = p1 + 1;
-		p2 = strstr (ns, "/");
+		p2 = strchr (ns, '/');
 		if (!p2) { // anal/m
 			char *tmp = p1 + 1;
 			int n = strlen (tmp);
@@ -1404,6 +1439,7 @@ static void autocomplete_sdb (RCore *core, RLineCompletion *completion, const ch
 				if (!strncmp (tmp, cur_cmd, n)) {
 					char *cmplt = r_str_newf ("anal/%s/", cur_cmd);
 					r_line_completion_push (completion, cmplt);
+					free (cmplt);
 				}
 				out += cur_pos - out + 1;
 			}
@@ -1411,11 +1447,12 @@ static void autocomplete_sdb (RCore *core, RLineCompletion *completion, const ch
 		} else { // anal/meta/*
 			char *tmp = p2 + 1;
 			int n = strlen (tmp);
-			char *spltr = strstr (ns, "/");
+			char *spltr = strchr (ns, '/');
 			*spltr = 0;
 			next_cmd = r_str_newf ("anal/%s/*", ns);
 			out = sdb_querys (sdb, NULL, 0, next_cmd);
 			if (!out) {
+				free (lpath);
 				return;
 			}
 			while (*out) {
@@ -1424,11 +1461,12 @@ static void autocomplete_sdb (RCore *core, RLineCompletion *completion, const ch
 					break;
 				}
 				temp_cmd = r_str_ndup (out, temp_pos - out); // contains the key=value pair
-				key = strstr (temp_cmd, "=");
+				key = strchr (temp_cmd, '=');
 				*key = 0;
 				if (!strncmp (tmp, temp_cmd, n)) {
 					char *cmplt = r_str_newf ("anal/%s/%s", ns, temp_cmd);
 					r_line_completion_push (completion, cmplt);
+					free (cmplt);
 				}
 				out += temp_pos - out + 1;
 			}
@@ -2059,8 +2097,8 @@ R_API char *r_core_anal_hasrefs(RCore *core, ut64 value, bool verbose) {
 }
 
 static char *r_core_anal_hasrefs_to_depth(RCore *core, ut64 value, int depth) {
-	r_return_val_if_fail (core && value != UT64_MAX, NULL);
-	if (depth < 1) {
+	r_return_val_if_fail (core, NULL);
+	if (depth < 1 || value == UT64_MAX) {
 		return NULL;
 	}
 	RStrBuf *s = r_strbuf_new (NULL);
@@ -2699,6 +2737,7 @@ R_API bool r_core_init(RCore *core) {
 	r_io_bind (core->io, &(core->dbg->iob));
 	r_io_bind (core->io, &(core->dbg->bp->iob));
 	r_core_bind (core, &core->dbg->corebind);
+	r_core_bind (core, &core->dbg->bp->corebind);
 	core->dbg->anal = core->anal; // XXX: dupped instance.. can cause lost pointerz
 	//r_debug_use (core->dbg, "native");
 // XXX pushing uninitialized regstate results in trashed reg values
@@ -2707,6 +2746,7 @@ R_API bool r_core_init(RCore *core) {
 	core->io->cb_printf = r_cons_printf;
 	core->dbg->cb_printf = r_cons_printf;
 	core->dbg->bp->cb_printf = r_cons_printf;
+	core->dbg->ev = core->ev;
 	// initialize config before any corebind
 	r_core_config_init (core);
 
@@ -2824,22 +2864,16 @@ R_API void r_core_free(RCore *c) {
 R_API void r_core_prompt_loop(RCore *r) {
 	int ret;
 	do {
-		if (r_core_prompt (r, false) < 1) {
+		int err = r_core_prompt (r, false);
+		if (err < 1) {
+			// handle ^D
+			r->num->value = 0; // r.num->value will be read by r_main_radare2() after calling this fcn
 			break;
 		}
-//			if (lock) r_th_lock_enter (lock);
-		if ((ret = r_core_prompt_exec (r))==-1) {
-			eprintf ("Invalid command\n");
+		/* -1 means invalid command, -2 means quit prompt loop */
+		if ((ret = r_core_prompt_exec (r)) == -2) {
+			break;
 		}
-/*			if (lock) r_th_lock_leave (lock);
-		if (rabin_th && !r_th_wait_async (rabin_th)) {
-			eprintf ("rabin thread end \n");
-			r_th_kill_free (rabin_th);
-			r_th_lock_free (lock);
-			lock = NULL;
-			rabin_th = NULL;
-		}
-*/
 	} while (ret != R_CORE_CMD_EXIT);
 }
 

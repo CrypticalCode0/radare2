@@ -15,6 +15,7 @@ typedef struct {
 #define R_STRBUF_SAFEGET(sb) (r_strbuf_get (sb) ? r_strbuf_get (sb) : "")
 R_API RStrBuf *r_strbuf_new(const char *s);
 R_API bool r_strbuf_set(RStrBuf *sb, const char *s);
+R_API bool r_strbuf_slice(RStrBuf *sb, int from, int len);
 R_API bool r_strbuf_setbin(RStrBuf *sb, const ut8 *s, int len);
 R_API ut8* r_strbuf_getbin(RStrBuf *sb, int *len);
 R_API bool r_strbuf_setf(RStrBuf *sb, const char *fmt, ...);
@@ -33,6 +34,7 @@ R_API void r_strbuf_init(RStrBuf *sb);
 R_API bool r_strbuf_copy(RStrBuf *dst, RStrBuf *src);
 R_API bool r_strbuf_equals(RStrBuf *sa, RStrBuf *sb);
 R_API bool r_strbuf_reserve(RStrBuf *sb, int len);
+R_API bool r_strbuf_is_empty(RStrBuf *sb);
 
 #ifdef __cplusplus
 }

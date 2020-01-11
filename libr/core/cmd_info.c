@@ -23,7 +23,7 @@ static const char *help_msg_i[] = {
 	"icg", "", "List classes as agn/age commands to create class hirearchy graphs",
 	"icq", "", "List classes, in quiet mode (just the classname)",
 	"icqq", "", "List classes, in quieter mode (only show non-system classnames)",
-	"iC", "", "Show signature info (entitlements, ...)",
+	"iC", "[j]", "Show signature info (entitlements, ...)",
 	"id", "[?]", "Debug information (source lines)",
 	"idp", "", "Load pdb file information",
 	"iD", " lang sym", "demangle symbolname for given language",
@@ -448,6 +448,7 @@ static int cmd_info(void *data, const char *input) {
 	int mode = 0; //R_MODE_SIMPLE;
 	bool rdump = false;
 	int is_array = 0;
+	bool is_izzzj = false;
 	Sdb *db;
 
 	for (i = 0; input[i] && input[i] != ' '; i++)
@@ -462,14 +463,17 @@ static int cmd_info(void *data, const char *input) {
 	if (mode == R_MODE_JSON) {
 		int suffix_shift = 0;
 		if (!strncmp (input, "SS", 2) || !strncmp (input, "ee", 2)
-			|| !strncmp (input, "zz", 2)) {
+		    || !strncmp (input, "zz", 2)) {
 			suffix_shift = 1;
 		}
 		if (strlen (input + 1 + suffix_shift) > 1) {
 			is_array = 1;
 		}
+		if (!strncmp (input, "zzz", 2)) {
+			is_izzzj = true;
+		}
 	}
-	if (is_array) {
+	if (is_array && !is_izzzj) {
 		r_cons_printf ("{");
 	}
 	if (!*input) {
@@ -579,12 +583,9 @@ static int cmd_info(void *data, const char *input) {
 				r_core_bin_info (core, x, mode, va, NULL, y);
 		case 'A': // "iA"
 			newline = false;
-			if (input[1] == 'j') {
-				r_cons_printf ("{");
-				r_bin_list_archs (core->bin, 'j');
-				r_cons_printf ("}\n");
-			} else {
-				r_bin_list_archs (core->bin, 1);
+			{
+				int mode = (input[1] == 'j')? 'j': 1;
+				r_bin_list_archs (core->bin, mode);
 			}
 			break;
 		case 'E': // "iE"
@@ -949,7 +950,7 @@ static int cmd_info(void *data, const char *input) {
 			RBININFO ("versioninfo", R_CORE_BIN_ACC_VERSIONINFO, NULL, 0);
 			break;
 		case 'T': // "iT"
-		case 'C': // "iC" // rabin2 -C create
+		case 'C': // "iC" // rabin2 -C create // should be deprecated and just use iT (or find a better name)
 			RBININFO ("signature", R_CORE_BIN_ACC_SIGNATURE, NULL, 0);
 			break;
 		case 'z': // "iz"
@@ -1233,7 +1234,7 @@ static int cmd_info(void *data, const char *input) {
 		}
 	}
 done:
-	if (is_array) {
+	if (is_array && !is_izzzj) {
 		r_cons_printf ("}\n");
 	}
 	if (newline) {

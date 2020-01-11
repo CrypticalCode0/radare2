@@ -45,6 +45,14 @@ static RList* r_debug_gdb_threads(RDebug *dbg, int pid) {
 	return list;
 }
 
+static RList* r_debug_gdb_pids(RDebug *dbg, int pid) {
+	RList *list;
+	if ((list = gdbr_pids_list (desc, pid))) {
+		list->free = (RListFree) &r_debug_pid_free;
+	}
+	return list;
+}
+
 static int r_debug_gdb_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 	int copy_size;
 	int buflen = 0;
@@ -307,8 +315,6 @@ static int r_debug_gdb_reg_write(RDebug *dbg, int type, const ut8 *buf, int size
 	RRegItem* current = NULL;
 	// We default to little endian if there's no way to get the configuration,
 	// since this was the behaviour prior to the change.
-	bool bigendian = dbg->corebind.core && \
-					 dbg->corebind.cfggeti (dbg->corebind.core, "cfg.bigendian");
 	RRegArena *arena = dbg->reg->regset[type].arena;
 	for (;;) {
 		current = r_reg_next_diff (dbg->reg, type, reg_buf, buflen, current, bits);
@@ -429,10 +435,17 @@ static int r_debug_gdb_attach(RDebug *dbg, int pid) {
 }
 
 static int r_debug_gdb_detach(RDebug *dbg, int pid) {
+	int ret = 0;
+
 	if (pid <= 0 || !desc->stub_features.multiprocess) {
-		return gdbr_detach (desc);
+		ret = gdbr_detach (desc);
 	}
-	return gdbr_detach_pid (desc, pid);
+	ret = gdbr_detach_pid (desc, pid);
+
+	if (dbg->pid == pid) {
+		desc = NULL;
+	}
+	return ret;
 }
 
 static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
@@ -1047,7 +1060,7 @@ static bool r_debug_gdb_kill(RDebug *dbg, int pid, int tid, int sig) {
 	return true;
 }
 
-static bool r_debug_gdb_select(RDebug *dbg, int pid, int tid) {
+static int r_debug_gdb_select(RDebug *dbg, int pid, int tid) {
 	if (!desc || !*origriogdb) {
 		desc = NULL;	//TODO hacky fix, please improve. I would suggest using a **desc instead of a *desc, so it is automatically updated
 		return false;
@@ -1111,6 +1124,7 @@ RDebugPlugin r_debug_plugin_gdb = {
 	.attach = &r_debug_gdb_attach,
 	.detach = &r_debug_gdb_detach,
 	.threads = &r_debug_gdb_threads,
+	.pids = &r_debug_gdb_pids,
 	.canstep = 1,
 	.wait = &r_debug_gdb_wait,
 	.map_get = r_debug_gdb_map_get,

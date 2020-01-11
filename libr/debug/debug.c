@@ -390,6 +390,7 @@ R_API RDebug *r_debug_new(int hard) {
 		dbg->bp = r_bp_new ();
 		r_debug_plugin_init (dbg);
 		dbg->bp->iob.init = false;
+		dbg->bp->baddr = 0;
 	}
 	return dbg;
 }
@@ -571,14 +572,21 @@ R_API int r_debug_start(RDebug *dbg, const char *cmd) {
 }
 
 R_API int r_debug_detach(RDebug *dbg, int pid) {
+	int ret = 0;
 	if (dbg->h && dbg->h->detach) {
-		return dbg->h->detach (dbg, pid);
+		ret = dbg->h->detach (dbg, pid);
+		if (dbg->pid == pid) {
+			dbg->pid = -1;
+			dbg->tid = -1;
+		}
 	}
-	return false;
+	return ret;
 }
 
 R_API bool r_debug_select(RDebug *dbg, int pid, int tid) {
 	ut64 pc = 0;
+	int prev_pid = dbg->pid;
+	int prev_tid = dbg->tid;
 
 	if (pid < 0) {
 		return false;
@@ -603,10 +611,15 @@ R_API bool r_debug_select(RDebug *dbg, int pid, int tid) {
 		return false;
 	}
 
-	r_io_system (dbg->iob.io, sdb_fmt ("pid %d", tid));
+	// Don't change the pid/tid if the plugin already modified it due to internal constraints
+	if (dbg->pid == prev_pid) {
+		dbg->pid = pid;
+	}
+	if (dbg->tid == prev_tid) {
+		dbg->tid = tid;
+	}
 
-	dbg->pid = pid;
-	dbg->tid = tid;
+	r_io_system (dbg->iob.io, sdb_fmt ("pid %d", dbg->tid));
 
 	// Synchronize with the current thread's data
 	if (dbg->corebind.core) {
@@ -688,6 +701,10 @@ R_API RDebugReasonType r_debug_wait(RDebug *dbg, RBreakpointItem **bp) {
 		reason = dbg->h->wait (dbg, dbg->pid);
 		if (reason == R_DEBUG_REASON_DEAD) {
 			eprintf ("\n==> Process finished\n\n");
+			REventDebugProcessFinished event = {
+				.pid = dbg->pid
+			};
+			r_event_send (dbg->ev, R_EVENT_DEBUG_PROCESS_FINISHED, &event);
 			// XXX(jjd): TODO: handle fallback or something else
 			//r_debug_select (dbg, -1, -1);
 			return R_DEBUG_REASON_DEAD;
@@ -888,11 +905,16 @@ R_API int r_debug_step_hard(RDebug *dbg) {
 		return false;
 	}
 	reason = r_debug_wait (dbg, NULL);
-	/* TODO: handle better */
-	if (reason == R_DEBUG_REASON_ERROR) {
+	if (reason == R_DEBUG_REASON_DEAD || r_debug_is_dead (dbg)) {
 		return false;
 	}
-	if (reason == R_DEBUG_REASON_DEAD || r_debug_is_dead (dbg)) {
+	// Unset breakpoints before leaving
+	if (reason != R_DEBUG_REASON_BREAKPOINT && reason != R_DEBUG_REASON_COND &&
+		reason != R_DEBUG_REASON_TRACEPOINT) {
+		r_bp_restore (dbg->bp, false);
+	}
+	/* TODO: handle better */
+	if (reason == R_DEBUG_REASON_ERROR) {
 		return false;
 	}
 	return true;
@@ -1115,20 +1137,21 @@ R_API bool r_debug_step_back(RDebug *dbg) {
 }
 
 R_API int r_debug_continue_kill(RDebug *dbg, int sig) {
-	RDebugReasonType reason, ret = false;
+	RDebugReasonType reason = R_DEBUG_REASON_NONE;
+	int ret = 0;
 	RBreakpointItem *bp = NULL;
 
 	if (!dbg) {
-		return false;
+		return 0;
 	}
 repeat:
 	if (r_debug_is_dead (dbg)) {
-		return false;
+		return 0;
 	}
 	if (dbg->h && dbg->h->cont) {
 		/* handle the stage-2 of breakpoints */
 		if (!r_debug_recoil (dbg, R_DBG_RECOIL_CONTINUE)) {
-			return false;
+			return 0;
 		}
 		/* tell the inferior to go! */
 		ret = dbg->h->cont (dbg, dbg->pid, dbg->tid, sig);
@@ -1158,12 +1181,12 @@ repeat:
 #if DEBUGGER
 			/// if the plugin is not compiled link fails, so better do runtime linking
 			/// until this code gets fixed
-			static void (*linux_attach_new_process) (RDebug *dbg) = NULL;
+			static bool (*linux_attach_new_process) (RDebug *dbg, int pid) = NULL;
 			if (!linux_attach_new_process) {
 				linux_attach_new_process = r_lib_dl_sym (NULL, "linux_attach_new_process");
 			}
 			if (linux_attach_new_process) {
-				linux_attach_new_process (dbg);
+				linux_attach_new_process (dbg, dbg->forked_pid);
 			}
 #endif
 			goto repeat;
@@ -1180,11 +1203,10 @@ repeat:
 			goto repeat;
 		}
 #endif
-#if __WINDOWS__
 		if (reason != R_DEBUG_REASON_DEAD) {
-			// XXX(jjd): returning a thread id?!
 			ret = dbg->tid;
 		}
+#if __WINDOWS__
 		if (reason == R_DEBUG_REASON_NEW_LIB ||
 			reason == R_DEBUG_REASON_EXIT_LIB ||
 			reason == R_DEBUG_REASON_NEW_TID ||
@@ -1205,7 +1227,7 @@ repeat:
 		/* if continuing killed the inferior, we won't be able to get
 		 * the registers.. */
 		if (reason == R_DEBUG_REASON_DEAD || r_debug_is_dead (dbg)) {
-			return false;
+			return 0;
 		}
 
 		/* if we hit a tracing breakpoint, we need to continue in
@@ -1217,7 +1239,9 @@ repeat:
 
 		/* choose the thread that was returned from the continue function */
 		// XXX(jjd): there must be a cleaner way to do this...
-		r_debug_select (dbg, dbg->pid, ret);
+		if (ret != dbg->tid) {
+			r_debug_select (dbg, dbg->pid, ret);
+		}
 		sig = 0; // clear continuation after signal if needed
 
 		/* handle general signals here based on the return from the wait
@@ -1250,9 +1274,17 @@ repeat:
 	}
 #if __WINDOWS__
 	r_cons_break_pop ();
+#elif __linux__
+	// Letting threads continue after the debugger breaks is currently problematic in linux
+	if (dbg->continue_all_threads) {
+		r_debug_stop (dbg);
+	}
 #endif
+	// Unset breakpoints before leaving
+	if (reason != R_DEBUG_REASON_BREAKPOINT) {
+		r_bp_restore (dbg->bp, false);
+	}
 	return ret;
-
 }
 
 R_API int r_debug_continue(RDebug *dbg) {
@@ -1645,9 +1677,6 @@ R_API int r_debug_drx_unset(RDebug *dbg, int idx) {
 }
 
 R_API ut64 r_debug_get_baddr(RDebug *dbg, const char *file) {
-	char *abspath;
-	RListIter *iter;
-	RDebugMap *map;
 	if (!dbg || !dbg->iob.io || !dbg->iob.io->desc) {
 		return 0LL;
 	}
@@ -1665,14 +1694,21 @@ R_API ut64 r_debug_get_baddr(RDebug *dbg, const char *file) {
 	}
 #if __WINDOWS__
 	ut64 base;
-	return r_io_desc_get_base (dbg->iob.io->desc, &base), base;
-#else
+	bool ret = r_io_desc_get_base (dbg->iob.io->desc, &base);
+	if (ret) {
+		return base;
+	}
+#endif
+	RListIter *iter;
+	RDebugMap *map;
 	r_debug_select (dbg, pid, tid);
 	r_debug_map_sync (dbg);
-	abspath = r_sys_pid_to_path (pid);
+	char *abspath = r_sys_pid_to_path (pid);
+#if !__WINDOWS__
 	if (!abspath) {
 		abspath = r_file_abspath (file);
 	}
+#endif
 	if (!abspath) {
 		abspath = strdup (file);
 	}
@@ -1693,5 +1729,18 @@ R_API ut64 r_debug_get_baddr(RDebug *dbg, const char *file) {
 		}
 	}
 	return 0LL;
-#endif
+}
+
+R_API void r_debug_bp_rebase(RDebug *dbg, ut64 old_base, ut64 new_base) {
+	RBreakpointItem *bp;
+	RListIter *iter;
+	ut64 diff = new_base - old_base;
+	// update bp->baddr
+	dbg->bp->baddr = new_base;
+
+	// update bp's address
+	r_list_foreach (dbg->bp->bps, iter, bp) {
+		bp->addr += diff;
+		bp->delta = bp->addr - dbg->bp->baddr;
+	}
 }

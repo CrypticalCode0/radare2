@@ -743,7 +743,7 @@ static void set_fcn_name_from_flag(RAnalFunction *fcn, RFlagItem *f, const char 
 	}
 }
 
-static int core_anal_fcn(RCore *core, ut64 at, ut64 from, int reftype, int depth) {
+static int __core_anal_fcn(RCore *core, ut64 at, ut64 from, int reftype, int depth) {
 	if (depth < 0) {
 //		printf ("Too deep for 0x%08"PFMT64x"\n", at);
 //		r_sys_backtrace ();
@@ -834,16 +834,6 @@ static int core_anal_fcn(RCore *core, ut64 at, ut64 from, int reftype, int depth
 				r_flag_space_push (core->flags, R_FLAGS_FS_FUNCTIONS);
 				r_flag_set (core->flags, fcn->name, fcn->addr, r_anal_fcn_size (fcn));
 				r_flag_space_pop (core->flags);
-			}
-			// XXX fixes overlined function ranges wtf  // fcn->addr = at;
-			/* TODO: Dupped analysis, needs more optimization */
-			fcn->depth = 256;
-			r_core_anal_bb (core, fcn, fcn->addr, true);
-			// hack
-			if (!fcn->depth) {
-				eprintf ("Analysis depth reached at 0x%08"PFMT64x"\n", fcn->addr);
-			} else {
-				fcn->depth = 256 - fcn->depth;
 			}
 
 			/* New function: Add initial xref */
@@ -1714,87 +1704,6 @@ static int core_anal_graph_nodes(RCore *core, RAnalFunction *fcn, int opts, PJ *
 	return nodes;
 }
 
-/* analyze a RAnalBlock at the address at and add that to the fcn function. */
-// TODO: move into RAnal.
-R_API int r_core_anal_bb(RCore *core, RAnalFunction *fcn, ut64 addr, int head) {
-	RAnalBlock *bb, *bbi;
-	RListIter *iter;
-	ut64 jump, fail;
-	int rc = true;
-	int ret = R_ANAL_RET_NEW;
-	bool x86 = core->anal->cur->arch && !strcmp (core->anal->cur->arch, "x86");
-
-	if (--fcn->depth <= 0) {
-		return false;
-	}
-
-	bb = r_anal_bb_new ();
-	if (!bb) {
-		return false;
-	}
-
-	r_list_foreach (fcn->bbs, iter, bbi) {
-		if (addr >= bbi->addr && addr < bbi->addr + bbi->size
-		    && (!core->anal->opt.jmpmid || !x86 || r_anal_bb_op_starts_at (bbi, addr))) {
-			ret = r_anal_fcn_split_bb (core->anal, fcn, bbi, addr);
-			break;
-		}
-	}
-	ut8 *buf = NULL;
-	if (ret == R_ANAL_RET_DUP) {
-		/* Dupped basic block */
-		goto error;
-	}
-
-	if (ret == R_ANAL_RET_NEW) { /* New bb */
-		// XXX: use read_ahead and so on, but don't allocate that much in here
-		const int buflen = core->anal->opt.bb_max_size; // OMG THIS IS SO WRONG
-		buf = calloc (1, buflen);
-		if (!buf) {
-			goto error;
-		}
-		int bblen = 0;
-		ut64 at;
-		do {
-			at = addr + bblen;
-			if (!r_io_is_valid_offset (core->io, at, !core->anal->opt.noncode)) {
-				goto error;
-			}
-			if (!r_io_read_at (core->io, at, buf, core->anal->opt.bb_max_size)) { // ETOOSLOW
-				goto error;
-			}
-			bblen = r_anal_bb (core->anal, bb, at, buf, buflen, head);
-			if (bblen == R_ANAL_RET_ERROR || (bblen == R_ANAL_RET_END && bb->size < 1)) { /* Error analyzing bb */
-				goto error;
-			}
-			if (bblen == R_ANAL_RET_END) { /* bb analysis complete */
-				ret = r_anal_fcn_bb_overlaps (fcn, bb);
-				if (ret == R_ANAL_RET_NEW) {
-					r_anal_fcn_bbadd (fcn, bb);
-					fail = bb->fail;
-					jump = bb->jump;
-					if (fail != -1) {
-						r_core_anal_bb (core, fcn, fail, false);
-					}
-					if (jump != -1) {
-						r_core_anal_bb (core, fcn, jump, false);
-					}
-				}
-			}
-		} while (bblen != R_ANAL_RET_END);
-		free (buf);
-		return true;
-	}
-	goto fin;
-error:
-	rc = false;
-fin:
-	r_list_delete_data (fcn->bbs, bb);
-	r_anal_bb_free (bb);
-	free (buf);
-	return rc;
-}
-
 /* seek basic block that contains address addr or just addr if there's no such
  * basic block */
 R_API bool r_core_anal_bb_seek(RCore *core, ut64 addr) {
@@ -1845,10 +1754,13 @@ R_API int r_core_anal_fcn(RCore *core, ut64 at, ut64 from, int reftype, int dept
 
 	//update bits based on the core->offset otherwise we could have the
 	//last value set and blow everything up
-	r_core_seek_archbits (core, at);
+	r_core_seek_arch_bits (core, at);
 
 	if (core->io->va) {
 		if (!r_io_is_valid_offset (core->io, at, !core->anal->opt.noncode)) {
+			if (core->anal->verbose) {
+				eprintf ("Warning: Address not mapped or not executable at 0x%08"PFMT64x"\n", at);
+			}
 			return false;
 		}
 	}
@@ -1878,6 +1790,9 @@ R_API int r_core_anal_fcn(RCore *core, ut64 at, ut64 from, int reftype, int dept
 		return false;
 	}
 	if (depth < 0) {
+		if (core->anal->verbose) {
+			eprintf ("Warning: anal depth reached\n");
+		}
 		return false;
 	}
 	if (r_cons_is_breaked ()) {
@@ -1910,7 +1825,7 @@ R_API int r_core_anal_fcn(RCore *core, ut64 at, ut64 from, int reftype, int dept
 			return true;
 		}
 	}
-	if (core_anal_fcn (core, at, from, reftype, depth - 1)) {
+	if (__core_anal_fcn (core, at, from, reftype, depth - 1)) {
 		// split function if overlaps
 		if (fcn) {
 			r_anal_fcn_resize (core->anal, fcn, at - fcn->addr);
@@ -2442,23 +2357,7 @@ static void fcn_list_bbs(RAnalFunction *fcn) {
 		r_cons_printf ("afb+ 0x%08" PFMT64x " 0x%08" PFMT64x " %d ",
 			       fcn->addr, bbi->addr, bbi->size);
 		r_cons_printf ("0x%08"PFMT64x" ", bbi->jump);
-		r_cons_printf ("0x%08"PFMT64x" ", bbi->fail);
-		if (bbi->type != R_ANAL_BB_TYPE_NULL) {
-			if ((bbi->type & R_ANAL_BB_TYPE_BODY)) {
-				r_cons_printf ("b");
-			}
-			if ((bbi->type & R_ANAL_BB_TYPE_FOOT)) {
-				r_cons_printf ("f");
-			}
-			if ((bbi->type & R_ANAL_BB_TYPE_HEAD)) {
-				r_cons_printf ("h");
-			}
-			if ((bbi->type & R_ANAL_BB_TYPE_LAST)) {
-				r_cons_printf ("l");
-			}
-		} else {
-			r_cons_printf ("n");
-		}
+		r_cons_printf ("0x%08"PFMT64x, bbi->fail);
 		if (bbi->diff) {
 			if (bbi->diff->type == R_ANAL_DIFF_TYPE_MATCH) {
 				r_cons_printf (" m");
@@ -3322,6 +3221,8 @@ R_API void r_core_recover_vars(RCore *core, RAnalFunction *fcn, bool argonly) {
 		if (bb->size > max_bb_size) {
 			continue;
 		}
+		int saved_stack = fcn->stack;
+		fcn->stack = bb->parent_stackptr;
 		ut64 pos = bb->addr;
 		while (pos < bb->addr + bb->size) {
 			if (r_cons_is_breaked ()) {
@@ -3334,6 +3235,11 @@ R_API void r_core_recover_vars(RCore *core, RAnalFunction *fcn, bool argonly) {
 			}
 			r_anal_extract_rarg (core->anal, op, fcn, reg_set, &count);
 			if (!argonly) {
+				if (op->stackop == R_ANAL_STACK_INC) {
+					fcn->stack += op->stackptr;
+				} else if (op->stackop == R_ANAL_STACK_RESET) {
+					fcn->stack = 0;
+				}
 				r_anal_extract_vars (core->anal, fcn, op);
 			}
 			int opsize = op->size;
@@ -3343,6 +3249,7 @@ R_API void r_core_recover_vars(RCore *core, RAnalFunction *fcn, bool argonly) {
 			}
 			pos += opsize;
 		}
+		fcn->stack = saved_stack;
 	}
 }
 
@@ -4862,7 +4769,6 @@ R_API void r_core_anal_esil(RCore *core, const char *str, const char *target) {
 		arch = R2_ARCH_MIPS;
 	}
 
-	int opalign = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_ALIGN);
 	const char *sn = r_reg_get_name (core->anal->reg, R_REG_NAME_SN);
 	if (!sn) {
 		eprintf ("Warning: No SN reg alias for current architecture.\n");
@@ -4897,10 +4803,14 @@ repeat:
 				r_list_free (list);
 			}
 		}
+
 		/* realign address if needed */
+		r_core_seek_arch_bits (core, cur);
+		int opalign = core->anal->pcalign;
 		if (opalign > 0) {
 			cur -= (cur % opalign);
 		}
+
 		r_anal_op_fini (&op);
 		r_asm_set_pc (core->assembler, cur);
 		if (!r_anal_op (core->anal, &op, cur, buf + i, iend - i, R_ANAL_OP_MASK_ESIL | R_ANAL_OP_MASK_VAL | R_ANAL_OP_MASK_HINT)) {

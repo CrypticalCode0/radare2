@@ -1708,6 +1708,11 @@ static void visual_comma(RCore *core) {
 	if (cmtfile) {
 		char *cwf = r_str_newf ("%s"R_SYS_DIR "%s", cwd, cmtfile);
 		char *odata = r_file_slurp (cwf, NULL);
+		if (!odata) {
+			eprintf ("Could not open '%s'.\n", cwf);
+			free (cwf);
+			goto beach;
+		}
 		char *data = r_core_editor (core, NULL, odata);
 		r_file_dump (cwf, (const ut8 *) data, -1, 0);
 		free (data);
@@ -1716,6 +1721,7 @@ static void visual_comma(RCore *core) {
 	} else {
 		eprintf ("No commafile found.\n");
 	}
+beach:
 	free (comment);
 	r_cons_enable_mouse (mouse_state && r_config_get_i (core->config, "scr.wheel"));
 }
@@ -2329,7 +2335,7 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 	const char *key_s;
 	int i, cols = core->print->cols;
 	int wheelspeed;
-	ut8 ch = och;
+	int ch = och;
 	if ((ut8)ch == KEY_ALTQ) {
 		r_cons_readchar ();
 		ch = 'q';

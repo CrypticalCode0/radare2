@@ -23,6 +23,8 @@
 #include <signal.h>
 #endif
 
+#include <assert.h>
+
 #define QSUPPORTED_MAX_RETRIES 5
 
 extern char hex2char (char *hex);
@@ -94,6 +96,7 @@ bool gdbr_lock_tryenter(libgdbr_t *g) {
 	if (!r_th_lock_tryenter (g->gdbr_lock)) {
 		return false;
 	}
+	g->gdbr_lock_depth++;
 	r_cons_break_push (gdbr_break_process, g);
 	return true;
 }
@@ -102,6 +105,7 @@ bool gdbr_lock_enter(libgdbr_t *g) {
 	r_cons_break_push (gdbr_break_process, g);
 	void *bed = r_cons_sleep_begin ();
 	r_th_lock_enter (g->gdbr_lock);
+	g->gdbr_lock_depth++;
 	r_cons_sleep_end (bed);
 	if (g->isbreaked) {
 		return false;
@@ -111,9 +115,12 @@ bool gdbr_lock_enter(libgdbr_t *g) {
 
 void gdbr_lock_leave(libgdbr_t *g) {
 	r_cons_break_pop ();
+	assert (g->gdbr_lock_depth > 0);
+	bool last_leave = g->gdbr_lock_depth == 1;
+	g->gdbr_lock_depth--;
 	r_th_lock_leave (g->gdbr_lock);
 	// if this is the last lock this thread holds make sure that we disable the break
-	if (!r_th_lock_check (g->gdbr_lock)) {
+	if (last_leave) {
 		g->isbreaked = false;
 	}
 }
@@ -688,7 +695,7 @@ int gdbr_read_registers(libgdbr_t *g) {
 	// each time "enter" is pressed. Otherwise the user will be forced to interrupt exit
 	// read_registers constantly while another task is in progress
 	if (!gdbr_lock_tryenter (g)) {
-		goto end;
+		return -1;
 	}
 
 	if (g->remote_type == GDB_REMOTE_TYPE_LLDB && !g->stub_features.lldb.g) {
@@ -1268,7 +1275,7 @@ int send_vcont(libgdbr_t *g, const char *command, const char *thread_id) {
 	g->stop_reason.is_valid = false;
 	ret = send_msg (g, tmp);
 	if (ret < 0) {
-		return ret;
+		goto end;
 	}
 
 	bed = r_cons_sleep_begin ();
@@ -1723,12 +1730,119 @@ end:
 	return ret;
 }
 
+RList* gdbr_pids_list(libgdbr_t *g, int pid) {
+	int ret = -1;
+	RList *list = NULL;
+	int tpid = -1, ttid = -1;
+	char *ptr, *ptr2, *exec_file;
+	RDebugPid *dpid = NULL;
+	RListIter *iter = NULL;
+
+	if (!g) {
+		return NULL;
+	}
+
+	if (!gdbr_lock_enter (g)) {
+		goto end;
+	}
+	if (!(list = r_list_new ())) {
+		ret = -1;
+		goto end;
+	}
+	// Use qfThreadInfo as a fallback since it doesn't actually show all children
+	if (g->stub_features.qXfer_threads_read) {
+		if (gdbr_read_processes_xml(g, pid, list) == 0) {
+			ret = 0;
+			goto end;
+		}
+	}
+	// Child processes will only show up in ThreadInfo if gdbr is currently processing a
+	// fork/vfork/exec event or if the children weren't detached yet. This is intended
+	// gdb `info inferiors` behavior that can only be avoided using xml.
+	eprintf ("WARNING: Showing possibly incomplete pid list due to xml protocol failure\n");
+
+	if (!g->stub_features.qXfer_exec_file_read
+		    || !(exec_file = gdbr_exec_file_read (g, pid))) {
+		exec_file = "";
+	}
+	if (send_msg (g, "qfThreadInfo") < 0 || read_packet (g, false) < 0 || send_ack (g) < 0
+		    || g->data_len == 0 || g->data[0] != 'm') {
+		ret = -1;
+		goto end;
+	}
+	while (1) {
+		g->data[g->data_len] = '\0';
+		ptr = g->data + 1;
+		while (ptr) {
+			if ((ptr2 = strchr (ptr, ','))) {
+				*ptr2 = '\0';
+				ptr2++;
+			}
+			if (read_thread_id (ptr, &tpid, &ttid, g->stub_features.multiprocess) < 0) {
+				ptr = ptr2;
+				continue;
+			}
+			// Avoid adding the same pid twice(could show more than once if it has threads)
+			r_list_foreach (list, iter, dpid) {
+				if (tpid == dpid->pid) {
+					continue;
+				}
+			}
+			if (!(dpid = R_NEW0 (RDebugPid)) || !(dpid->path = strdup (exec_file))) {
+				ret = -1;
+				goto end;
+			}
+			dpid->pid = tpid;
+			// If the pid isn't the debugged pid it must be a child pid
+			if (tpid != g->pid) {
+				dpid->ppid = g->pid;
+			}
+			dpid->uid = dpid->gid = -1;
+			dpid->runnable = true;
+			dpid->status = R_DBG_PROC_STOP;
+			r_list_append (list, dpid);
+			ptr = ptr2;
+		}
+		if (send_msg (g, "qsThreadInfo") < 0 || read_packet (g, false) < 0
+			    || send_ack (g) < 0 || g->data_len == 0
+			    || (g->data[0] != 'm' && g->data[0] != 'l')) {
+			ret = -1;
+			goto end;
+		}
+		if (g->data[0] == 'l') {
+			break;
+		}
+	}
+
+	ret = 0;
+end:
+	gdbr_lock_leave (g);
+	if (ret != 0) {
+		if (dpid) {
+			free (dpid);
+		}
+		// We can't use r_debug_pid_free here
+		if (list) {
+			r_list_foreach (list, iter, dpid) {
+				if (dpid->path) {
+					free (dpid->path);
+				}
+				free (dpid);
+			}
+			r_list_free (list);
+		}
+		return NULL;
+	}
+	return list;
+}
+
 RList* gdbr_threads_list(libgdbr_t *g, int pid) {
 	int ret = -1;
 	RList *list = NULL;
 	int tpid = -1, ttid = -1;
 	char *ptr, *ptr2, *exec_file;
-	RDebugPid *dpid;
+	RDebugPid *dpid = NULL;
+	RListIter *iter = NULL;
 
 	if (!g) {
 		return NULL;
@@ -1795,7 +1909,6 @@ RList* gdbr_threads_list(libgdbr_t *g, int pid) {
 			break;
 		}
 	}
-	RListIter *iter;
 	// This is the all I've been able to extract from gdb so far
 	r_list_foreach (list, iter, dpid) {
 		if (gdbr_is_thread_dead (g, pid, dpid->pid)) {
@@ -1810,7 +1923,14 @@ end:
 		if (dpid) {
 			free (dpid);
 		}
+		// We can't use r_debug_pid_free here
 		if (list) {
+			r_list_foreach (list, iter, dpid) {
+				if (dpid->path) {
+					free (dpid->path);
+				}
+				free (dpid);
+			}
 			r_list_free (list);
 		}
 		return NULL;

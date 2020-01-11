@@ -4,7 +4,7 @@ r_search_sources = [
   'keyword.c',
   # 'old_xrefs.c',
   'regexp.c',
-  'rsa-find.c',
+  'privkey-find.c',
   'search.c',
   'strings.c',
   'xrefs.c',
@@ -12,7 +12,7 @@ r_search_sources = [
 
 r_search = library('r_search', r_search_sources,
   include_directories: [platform_inc],
-  c_args: library_cflags,
+  c_args: library_cflags + ['-DR_SEARCH_SRC=1'],
   dependencies: [r_util_dep],
   install: true,
   implicit_include_directories: false,

@@ -138,6 +138,7 @@ bin_plugins = [
   'elf64',
   'fs',
   'java',
+  'le',
   'mach0',
   'mach064',
   'mbn',
@@ -180,6 +181,7 @@ bin_ldr_plugins = [
 bin_xtr_plugins = [
   'xtr_dyldcache',
   'xtr_fatmach0',
+  'xtr_sep64',
 ]
 
 bp_plugins = [
@@ -408,6 +410,7 @@ r_util_files = [
   'include/r_util/r_queue.h',
   'include/r_util/r_range.h',
   'include/r_util/r_rbtree.h',
+  'include/r_util/r_intervaltree.h',
   'include/r_util/r_sandbox.h',
   'include/r_util/r_signal.h',
   'include/r_util/r_spaces.h',

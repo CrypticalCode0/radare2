@@ -31,7 +31,7 @@ R_API void r_anal_cc_set(RAnal *anal, const char *expr) {
 			const char *ret = r_list_get_n (retName, 0);
 			const char *name = r_list_get_n (retName, 1);
 			sdb_set (DB, name, "cc", 0);
-			sdb_set (DB, sdb_fmt ("cc.%s.ret"), ret, 0);
+			sdb_set (DB, sdb_fmt ("cc.%s.ret", name), ret, 0);
 			RListIter *iter;
 			const char *arg;
 			int n = 0;
@@ -90,25 +90,18 @@ R_API bool r_anal_cc_exist (RAnal *anal, const char *convention) {
 	return x && *x && !strcmp (x, "cc");
 }
 
-// TODO: all callers to this function expect NON-NULL, so lets return "" on fail for now
 R_API const char *r_anal_cc_arg(RAnal *anal, const char *convention, int n) {
 	r_return_val_if_fail (anal && convention, NULL);
 	if (n < 0) {
-		return "";
+		return NULL;
 	}
 	const char *query = sdb_fmt ("cc.%s.arg%d", convention, n);
 	const char *ret = sdb_const_get (DB, query, 0);
 	if (!ret) {
 		query = sdb_fmt ("cc.%s.argn", convention);
 		ret = sdb_const_get (DB, query, 0);
-#if 0
-		if (!strcmp (ret, "stack")) {
-			// TODO handle stack arguments here
-			return NULL;
-		}
-#endif
 	}
-	return r_str_constpool_get (&anal->constpool, ret ? ret : "");
+	return ret? r_str_constpool_get (&anal->constpool, ret): NULL;
 }
 
 R_API int r_anal_cc_max_arg(RAnal *anal, const char *cc) {

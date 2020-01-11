@@ -417,17 +417,23 @@ R_API RConfigNode* r_config_set(RConfig *cfg, const char *name, const char *valu
 				if (node->value == value) {
 					goto beach;
 				}
-				char *tmp = node->value;
-				node->value = strdup (value);
-				free (tmp);
-				if (IS_DIGIT (*value)) {
+				free (node->value);
+				if (r_str_is_false (value)) {
+					node->value = strdup ("false");
+					node->i_value = 0;
+				} else if (r_str_is_true (value)) {
+					node->value = strdup ("true");
+					node->i_value = 1;
+				} else {
+					node->value = strdup (value);
+					node->i_value = 2;
+				}
+				if (IS_DIGIT (*value) || (value[0] == '-' && IS_DIGIT (value[1]))) {
 					if (strchr (value, '/')) {
 						node->i_value = r_num_get (cfg->num, value);
 					} else {
 						node->i_value = r_num_math (cfg->num, value);
 					}
-				} else {
-					node->i_value = 0;
 				}
 				node->flags |= CN_INT;
 			}
@@ -692,4 +698,27 @@ R_API void r_config_bump(RConfig *cfg, const char *key) {
 		r_config_set (cfg, key, orig);
 		free (orig);
 	}
+}
+
+R_API void r_config_serialize(R_NONNULL RConfig *config, R_NONNULL Sdb *db) {
+	RListIter *iter;
+	RConfigNode *node;
+	r_list_foreach (config->nodes, iter, node) {
+		sdb_set (db, node->name, node->value, 0);
+	}
+}
+
+static int load_config_cb(void *user, const char *k, const char *v) {
+	RConfig *config = user;
+	RConfigNode *node = r_config_node_get (config, k);
+	if (!node) {
+		return 1;
+	}
+	r_config_set (config, k, v);
+	return 1;
+}
+
+R_API bool r_config_unserialize(R_NONNULL RConfig *config, R_NONNULL Sdb *db, R_NULLABLE char **err) {
+	sdb_foreach (db, load_config_cb, config);
+	return true;
 }

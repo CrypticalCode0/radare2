@@ -154,6 +154,27 @@ R_API int r_core_bin_set_by_fd(RCore *core, ut64 bin_fd) {
 	return false;
 }
 
+R_API bool r_core_bin_load_structs(RCore *core, const char *file) {
+	if (!file) {
+		int fd = r_io_fd_get_current (core->io);
+		RIODesc *desc = r_io_desc_get (core->io, fd);
+		if (desc) {
+			file = desc->name;
+		}
+		if (!file) {
+			return false;
+		}
+	}
+	if (strchr (file, '\"')) {  // TODO: escape "?
+		eprintf ("Invalid char found in filename\n");
+		return false;
+	}
+	// TODO use the RBin API, not cmdf()
+	// r_core_bin_export_info_rad (core);
+	r_core_cmdf (core, "\".!rabin2 -rk. %s\"", file);
+	return true;
+}
+
 R_API int r_core_bin_set_by_name(RCore *core, const char * name) {
 	if (r_bin_file_set_cur_by_name (core->bin, name)) {
 		r_core_bin_set_cur (core, r_bin_cur (core->bin));
@@ -174,6 +195,7 @@ R_API int r_core_bin_set_env(RCore *r, RBinFile *binfile) {
 		ut64 baseaddr = r_bin_get_baddr (r->bin);
 		r_config_set_i (r->config, "bin.baddr", baseaddr);
 		sdb_num_add (r->sdb, "orig_baddr", baseaddr, 0);
+		r->dbg->bp->baddr = baseaddr;
 		r_config_set (r->config, "asm.arch", arch);
 		r_config_set_i (r->config, "asm.bits", bits);
 		r_config_set (r->config, "anal.arch", arch);
@@ -368,10 +390,6 @@ static void _print_strings(RCore *r, RList *list, int mode, int va) {
 				}
 			}
 
-
-			if (str == no_dbl_bslash_str) {
-				R_FREE (str);
-			}
 			RStrBuf *buf = r_strbuf_new (str);
 			switch (string->type) {
 			case R_STRING_TYPE_UTF8:
@@ -402,6 +420,7 @@ static void _print_strings(RCore *r, RList *list, int mode, int va) {
 				(int)string->length, (int)string->size, section_name,
 				type_string, bufstr);
 			free (bufstr);
+			free (no_dbl_bslash_str);
 		}
 		last_processed = iter;
 	}
@@ -441,6 +460,7 @@ static bool bin_raw_strings(RCore *r, int mode, int va) {
 		eprintf ("Core file not open\n");
 		if (IS_MODE_JSON (mode)) {
 			r_cons_print ("[]");
+			return true;
 		}
 		return false;
 	}
@@ -493,6 +513,7 @@ static bool bin_strings(RCore *r, int mode, int va) {
 		if (strcmp (plugin->name, "any") == 0 && !rawstr) {
 			if (IS_MODE_JSON (mode)) {
 				r_cons_print ("[]");
+				return true;
 			}
 			return false;
 		}
@@ -609,6 +630,9 @@ static int bin_info(RCore *r, int mode, ut64 laddr) {
 	RBinInfo *info = r_bin_get_info (r->bin);
 	RBinFile *bf = r_bin_cur (r->bin);
 	if (!bf) {
+		if (IS_MODE_JSON (mode)) {
+			r_cons_printf ("{}");
+		}
 		return false;
 	}
 	RBinObject *obj = bf->o;
@@ -618,6 +642,7 @@ static int bin_info(RCore *r, int mode, ut64 laddr) {
 	if (!bf || !info || !obj) {
 		if (mode & R_MODE_JSON) {
 			r_cons_printf ("{}");
+			return true;
 		}
 		return false;
 	}
@@ -906,6 +931,11 @@ static int bin_dwarf(RCore *core, int mode) {
 	int *lfl = NULL;
 	char *lfc = NULL;
 	int lflc = 0;
+	PJ *j = NULL;
+	if (IS_MODE_JSON (mode)) {
+		j = pj_new ();
+		pj_a (j);
+	}
 
 	//TODO we should need to store all this in sdb, or do a filecontentscache in libr/util
 	//XXX this whole thing has leaks
@@ -974,6 +1004,25 @@ static int bin_dwarf(RCore *core, int mode) {
 				r_meta_set_string (core->anal, R_META_TYPE_COMMENT, row->address, cmt);
 				free (cmt);
 #endif
+			} else if(IS_MODE_JSON(mode)) {
+				pj_a (j);
+
+				pj_o (j);
+				pj_ks (j, "name", "CC");
+				pj_ks (j, "file", file);
+				pj_ki (j, "line_num", (int) row->line);
+				pj_kn (j, "addr", row->address);
+				pj_end (j);
+
+				pj_o (j);
+				pj_ks (j, "name", "CL");
+				pj_ks (j, "file", file);
+				pj_ki (j, "line_num", (int) row->line);
+				pj_ks (j, "line", line ? line : "");
+				pj_kn (j, "addr", row->address);
+				pj_end (j);
+
+				pj_end (j);
 			} else {
 				r_cons_printf ("CL %s:%d 0x%08" PFMT64x "\n",
 					       file, (int)row->line,
@@ -989,6 +1038,12 @@ static int bin_dwarf(RCore *core, int mode) {
 			r_cons_printf ("0x%08" PFMT64x "\t%s\t%d\n",
 				       row->address, row->file, row->line);
 		}
+	}
+	if (IS_MODE_JSON(mode)) {
+		pj_end (j);
+		r_cons_printf ("%s", pj_string (j));
+		pj_free (j);
+		j = NULL;
 	}
 	r_cons_break_pop ();
 	R_FREE (lastFileContents);
@@ -1561,7 +1616,9 @@ static int bin_relocs(RCore *r, int mode, int va) {
 				}
 
 				// check if name is available
-				pj_ks (pj, "name", (relname && strcmp (relname, "")) ? relname : "N/A");
+				if (relname && *relname) {
+					pj_ks (pj, "name", relname);
+				}
 				pj_ks (pj, "demname", mn ? mn : "");
 				pj_ks (pj, "type", bin_reloc_type_name (reloc));
 				pj_kn (pj, "vaddr", reloc->vaddr);
@@ -1642,6 +1699,9 @@ static int bin_relocs(RCore *r, int mode, int va) {
 	db = NULL;
 
 	R_TIME_END;
+	if (IS_MODE_JSON (mode) && relocs == NULL) {
+		return true;
+	}
 	return relocs != NULL;
 }
 
@@ -1757,8 +1817,10 @@ static int bin_imports(RCore *r, int mode, int va, const char *name) {
 	char *str;
 	int i = 0;
 
-
 	if (!info) {
+		if (IS_MODE_JSON (mode)) {
+			r_cons_printf ("[]");
+		}
 		return false;
 	}
 
@@ -1969,7 +2031,9 @@ static void handle_arm_special_symbol(RCore *core, RBinSymbol *symbol, int va) {
 		// is in the middle of the code and it would make the code less
 		// readable.
 	} else {
-		R_LOG_WARN ("Special symbol %s not handled\n", symbol->name);
+		if (core->bin->verbose) {
+			R_LOG_WARN ("Special symbol %s not handled\n", symbol->name);
+		}
 	}
 }
 
@@ -2022,6 +2086,10 @@ static int bin_symbols(RCore *r, int mode, ut64 laddr, int va, ut64 at, const ch
 	RTable *table = r_core_table (r);
 	bool bin_demangle = r_config_get_i (r->config, "bin.demangle");
 	if (!info) {
+		if (IS_MODE_JSON (mode)) {
+			r_cons_printf ("[]");
+		}
+		r_table_free (table);
 		return 0;
 	}
 
@@ -2497,7 +2565,8 @@ static int bin_sections(RCore *r, int mode, ut64 laddr, int va, ut64 at, const c
 		r_flag_space_set (r->flags, print_segments? R_FLAGS_FS_SEGMENTS: R_FLAGS_FS_SECTIONS);
 	}
 	if (IS_MODE_NORMAL (mode)) {
-		r_table_set_columnsf (table, "dXxXxss", "nth", "paddr", "size", "vaddr", "vsize", "perm", "name");
+		r_table_set_columnsf (table, "dXxXxss",
+			"nth", "paddr", "size", "vaddr", "vsize", "perm", "name");
 		// r_table_align (table, 0, R_TABLE_ALIGN_CENTER);
 		r_table_align (table, 2, R_TABLE_ALIGN_RIGHT);
 		r_table_align (table, 4, R_TABLE_ALIGN_RIGHT);
@@ -2715,6 +2784,8 @@ static int bin_sections(RCore *r, int mode, ut64 laddr, int va, ut64 at, const c
 			const char *name = (r->bin->prefix)
 				? sdb_fmt ("%s.%s", r->bin->prefix, section->name)
 				: section->name;
+			// seems like asm.bits is a bitmask that seems to be always 32,64
+			// const char *asmbits = r_str_sysbits (bits);
 			r_table_add_rowf (table, "dXxXxss", i,
 				(ut64)section->paddr, (ut64)section->size,
 				(ut64)addr, (ut64)section->vsize,
@@ -2980,6 +3051,7 @@ static int bin_classes(RCore *r, int mode) {
 	if (!cs) {
 		if (IS_MODE_JSON (mode)) {
 			r_cons_print ("[]");
+			return true;
 		}
 		return false;
 	}
@@ -3242,6 +3314,7 @@ static int bin_mem(RCore *r, int mode) {
 	if (!(mem = r_bin_get_mem (r->bin))) {
 		if (IS_MODE_JSON (mode)) {
 			r_cons_print("[]");
+			return true;
 		}
 		return false;
 	}
@@ -3266,6 +3339,8 @@ static void bin_pe_versioninfo(RCore *r, int mode) {
 	const char *format_string = "%s/string%d";
 	if (!IS_MODE_JSON (mode)) {
 		r_cons_printf ("=== VS_VERSIONINFO ===\n\n");
+	} else {
+		r_cons_print ("{");
 	}
 	bool firstit_dowhile = true;
 	do {
@@ -3277,7 +3352,7 @@ static void bin_pe_versioninfo(RCore *r, int mode) {
 			r_cons_printf (",");
 		}
 		if (IS_MODE_JSON (mode)) {
-			r_cons_printf ("{\"VS_FIXEDFILEINFO\":{");
+			r_cons_printf ("\"VS_FIXEDFILEINFO\":{");
 		} else {
 			r_cons_printf ("# VS_FIXEDFILEINFO\n\n");
 		}
@@ -3375,11 +3450,14 @@ static void bin_pe_versioninfo(RCore *r, int mode) {
 			free (path_stringtable);
 		}
 		if (IS_MODE_JSON (mode)) {
-			r_cons_printf ("}}");
+			r_cons_printf ("}");
 		}
 		num_version++;
 		firstit_dowhile = false;
 	} while (sdb);
+	if (IS_MODE_JSON (mode)) {
+		r_cons_printf ("}");
+	}
 }
 
 static void bin_elf_versioninfo(RCore *r, int mode) {
@@ -3665,7 +3743,11 @@ static int bin_signature(RCore *r, int mode) {
 	RBinPlugin *plg = r_bin_file_cur_plugin (cur);
 	if (plg && plg->signature) {
 		const char *signature = plg->signature (cur, IS_MODE_JSON (mode));
-		r_cons_println (signature);
+		if (IS_MODE_JSON (mode)) {
+			r_cons_printf ("{\"signature\":%s}", signature);
+		} else {
+			r_cons_println (signature);
+		}
 		free ((char*) signature);
 		return true;
 	}

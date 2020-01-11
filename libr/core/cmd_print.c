@@ -2571,7 +2571,7 @@ r_cons_pop();
 	for (i = 0; i < count; i++) {
 		ut64 addr = UT64_MAX;
 		ox = strstr (line, "0x");
-		qo = strstr (line, "\"");
+		qo = strchr (line, '\"');
 		R_FREE (string);
 		if (ox) {
 			addr = r_num_get (NULL, ox);
@@ -2697,7 +2697,7 @@ r_cons_pop();
 		}
 		if (str) {
 			str = strdup (str);
-			char *qoe = strstr (str, ";");
+			char *qoe = strchr (str, ';');
 			if (qoe) {
 				char* t = str;
 				str = r_str_ndup (str, qoe - str);
@@ -4651,7 +4651,7 @@ static void print_c_code(RPrint *p, ut64 addr, const ut8 *buf, int len, int ws, 
 }
 
 R_API void r_print_code(RPrint *p, ut64 addr, const ut8 *buf, int len, char lang) {
-	int i, w = p->cols * 0.7;
+	int i, w = (int)(p->cols * 0.7);
 	if (w < 1) {
 		w = 1;
 	}
@@ -5557,7 +5557,7 @@ static int cmd_print(void *data, const char *input) {
 			pd_result = 0;
 			processed_cmd = true;
 			break;
-		case 't': // "pdt" 
+		case 't': // "pdt"
 			r_core_disasm_table (core, l, r_str_trim_ro (input + 2));
 			pd_result = 0;
 			processed_cmd = true;
@@ -6355,6 +6355,10 @@ l = use_blocksize;
 			eprintf ("Usage: p3 [file] - print 3D stereogram image of current block\n");
 		} else if (input[1] == ' ') {
 			char *data = r_file_slurp (input + 2, NULL);
+			if (!data) {
+				eprintf ("Could not open '%s'.\n", input + 2);
+				break;
+			}
 			char *res = r_print_stereogram (data, 78, 20);
 			r_print_stereogram_print (core->print, res);
 			// if (data) eprintf ("%s\n", data);
@@ -6712,7 +6716,7 @@ l = use_blocksize;
 							if (v == f->offset) {
 								fn = strdup (f->name);
 							} else {
-								fn = r_str_newf ("%s+%d", f->name, v - f->offset);
+								fn = r_str_newf ("%s+%"PFMT64d, f->name, v - f->offset);
 							}
 						}
 					}

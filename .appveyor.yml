@@ -64,7 +64,7 @@ install:
 build_script:
   - appveyor AddMessage "Compiling radare2 %R2_VERSION% (%builder%)"
 
-  - cmd: if %builder% == vs2017_64 ( set "PATH=C:\mingw\bin;C:\mingw\msys\1.0\bin;%PYTHON%;%PATH%" && call "%VSVARSALLPATH2017%" x64 && python sys\meson.py --backend vs2017 --release --xp --install="%DIST_FOLDER%" --webui --options static_runtime=true && 7z a %ARTIFACT_ZIP% %DIST_FOLDER% )
+  - cmd: if %builder% == vs2017_64 ( set "PATH=C:\mingw\bin;C:\mingw\msys\1.0\bin;%PYTHON%;%PATH%" && call "%VSVARSALLPATH2017%" x64 && set CL=/DONE_STREAM_HACK#1 && python sys\meson.py --backend vs2017 --release --xp --install="%DIST_FOLDER%" --webui --options static_runtime=true && 7z a %ARTIFACT_ZIP% %DIST_FOLDER% )
 
   - cmd: if %builder% == vs2019_64 ( choco install mingw && refreshenv && set "PATH=C:\mingw\bin;C:\mingw\msys\1.0\bin;%PYTHON%;%PATH%" && call "%VSVARSALLPATH2019%" x64 && python sys\meson.py --backend vs2019 --release --install="%DIST_FOLDER%" --webui --options static_runtime=true && 7z a %ARTIFACT_ZIP% %DIST_FOLDER% )
 
@@ -79,10 +79,9 @@ test_script:
   - radare2 -v
   - ps: Install-Product node $env:nodejs_version
   - node --version
-  - git clone https://github.com/radareorg/radare2-regressions
-  - cd radare2-regressions/new
-  - ps: $env:pull_owner=($env:APPVEYOR_PULL_REQUEST_HEAD_REPO_NAME -split "/")[0]
-  - ps: if (-not [string]::IsNullOrWhiteSpace($env:pull_owner)) {cmd /c "(git fetch git://github.com/%pull_owner%/radare2-regressions %APPVEYOR_PULL_REQUEST_HEAD_REPO_BRANCH%:%pull_owner%_%APPVEYOR_PULL_REQUEST_HEAD_REPO_BRANCH% && git checkout %pull_owner%_%APPVEYOR_PULL_REQUEST_HEAD_REPO_BRANCH%) > nul 2>&1 || exit 0"} else {echo "Using master"}
+  - cd test
+  - git clone -q --depth 1 https://github.com/radareorg/radare2-testbins bins
+  - cd new
   - npm install
   - set NOOK=1
   - node_modules/.bin/r2r

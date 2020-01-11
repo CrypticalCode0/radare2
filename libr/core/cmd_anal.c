@@ -335,7 +335,7 @@ static const char *help_msg_afb[] = {
 	"afb", " [addr]", "list basic blocks of function",
 	"afb.", " [addr]", "show info of current basic block",
 	"afb=", "", "display ascii-art bars for basic block regions",
-	"afb+", " fcn_at bbat bbsz [jump] [fail] ([type] ([diff]))", "add basic block by hand",
+	"afb+", " fcn_at bbat bbsz [jump] [fail] ([diff])", "add basic block by hand",
 	"afbc", " [addr] [color(ut32)]", "set a color for the bb at a given address",
 	"afbe", " bbfrom bbto", "add basic-block edge for switch-cases",
 	"afbi", "", "print current basic block information",
@@ -570,12 +570,12 @@ static const char *help_msg_ah[] = {
 	"ahh", " 0x804840", "highlight this address offset in disasm",
 	"ahi", "[?] 10", "define numeric base for immediates (1, 8, 10, 16, s)",
 	"ahj", "", "list hints in JSON",
-	"aho", " call", "change opcode type (see aho?)",
+	"aho", " call", "change opcode type (see aho?) (deprecated, moved to \"ahd\")",
 	"ahp", " addr", "set pointer hint",
 	"ahr", " val", "set hint for return value of a function",
 	"ahs", " 4", "set opcode size=4",
 	"ahS", " jz", "set asm.syntax=jz for this opcode",
-	"aht", " [?] <type>", "Mark immediate as a type offset",
+	"aht", " [?] <type>", "Mark immediate as a type offset (deprecated, moved to \"aho\")",
 	"ahv", " val", "change opcode's val field (useful to set jmptbl sizes in jmp rax)",
 	NULL
 };
@@ -1380,8 +1380,9 @@ static int var_cmd(RCore *core, const char *str) {
 				break;
 			}
 			rw = (str[1] == 'g')? 0: 1;
+			int ptr = *var->type == 's' ? idx - fcn->maxstack : idx;
 			r_anal_var_access (core->anal, fcn->addr, str[0],
-					R_ANAL_VAR_SCOPE_LOCAL, idx, rw, addr);
+					R_ANAL_VAR_SCOPE_LOCAL, idx, ptr, rw, addr);
 			r_anal_var_free (var);
 		} else {
 			eprintf ("Missing argument\n");
@@ -1614,9 +1615,9 @@ static void core_anal_bytes(RCore *core, const ut8 *buf, int len, int nops, int 
 		// TODO: use more anal hints
 		hint = r_anal_hint_get (core->anal, addr);
 		r_asm_set_pc (core->assembler, addr);
-		(void)r_asm_disassemble (core->assembler, &asmop, buf + idx, len - idx);
 		ret = r_anal_op (core->anal, &op, addr, buf + idx, len - idx,
 			R_ANAL_OP_MASK_ESIL | R_ANAL_OP_MASK_OPEX | R_ANAL_OP_MASK_HINT);
+		(void)r_asm_disassemble (core->assembler, &asmop, buf + idx, len - idx);
 		esilstr = R_STRBUF_SAFEGET (&op.esil);
 		opexstr = R_STRBUF_SAFEGET (&op.opex);
 		char *mnem = strdup (r_asm_op_get_asm (&asmop));
@@ -2326,7 +2327,7 @@ static int anal_fcn_add_bb(RCore *core, const char *input) {
 	ptr = strdup (input);
 
 	switch (r_str_word_set0 (ptr)) {
-	case 7:
+	case 6:
 		ptr2 = r_str_word_get0 (ptr, 6);
 		if (!(diff = r_anal_diff_new ())) {
 			eprintf ("error: Cannot init RAnalDiff\n");
@@ -2337,20 +2338,6 @@ static int anal_fcn_add_bb(RCore *core, const char *input) {
 			diff->type = R_ANAL_DIFF_TYPE_MATCH;
 		} else if (ptr2[0] == 'u') {
 			diff->type = R_ANAL_DIFF_TYPE_UNMATCH;
-		}
-	case 6:
-		ptr2 = r_str_word_get0 (ptr, 5);
-		if (strchr (ptr2, 'h')) {
-			type |= R_ANAL_BB_TYPE_HEAD;
-		}
-		if (strchr (ptr2, 'b')) {
-			type |= R_ANAL_BB_TYPE_BODY;
-		}
-		if (strchr (ptr2, 'l')) {
-			type |= R_ANAL_BB_TYPE_LAST;
-		}
-		if (strchr (ptr2, 'f')) {
-			type |= R_ANAL_BB_TYPE_FOOT;
 		}
 	case 5: // get fail
 		fail = r_num_math (core->num, r_str_word_get0 (ptr, 4));
@@ -2708,7 +2695,7 @@ static void __updateStats(RCore *core, Sdb *db, ut64 addr, int statsMode) {
 		sdb_num_inc (db, type, 1, 0);
 	} else {
 		char *mnem = strdup (op->mnemonic);
-		char *sp = strstr (mnem, " ");
+		char *sp = strchr (mnem, ' ');
 		if (sp) {
 			*sp = 0;
 			//memmove (mnem, sp + 1, strlen (sp));
@@ -2810,7 +2797,7 @@ static void __core_cmd_anal_fcn_allstats(RCore *core, const char *input) {
 	RList *dbs = r_list_newf ((RListFree)sdb_free);
 	Sdb *d = sdb_new0 ();
 	ut64 oseek = core->offset;
-	bool isJson = strstr (input, "j") != NULL;
+	bool isJson = strchr (input, 'j') != NULL;
 	
 	char *inp = r_str_newf ("*%s", input);
 	r_list_foreach (core->anal->fcns, iter, fcn) {
@@ -3407,6 +3394,7 @@ static int cmd_anal_fcn(RCore *core, const char *input) {
 				char *cc = argument;
 				r_str_trim (cc);
 				r_core_cmdf (core, "k anal/cc/default.cc=%s", cc);
+				r_anal_set_reg_profile (core->anal);
 				free (argument);
 			} else {
 				r_core_cmd0 (core, "k anal/cc/default.cc");
@@ -3800,6 +3788,10 @@ static int cmd_anal_fcn(RCore *core, const char *input) {
 			if (core->anal->opt.vars) {
 				r_core_recover_vars (core, fcn, true);
 			}
+		} else {
+			if (core->anal->verbose) {
+				eprintf ("Warning: Unable to analyze function at 0x%08"PFMT64x"\n", addr);
+			}
 		}
 		if (analyze_recursively) {
 			fcn = r_anal_get_fcn_in (core->anal, addr, 0); /// XXX wrong in case of nopskip
@@ -3992,13 +3984,26 @@ void cmd_anal_reg(RCore *core, const char *str) {
 	switch (str[0]) {
 	case 'l': // "arl"
 	{
+		const bool use_json = str[1] == 'j';
 		RRegSet *rs = r_reg_regset_get (core->anal->reg, R_REG_TYPE_GPR);
 		if (rs) {
 			RRegItem *r;
 			RListIter *iter;
+			PJ *pj = pj_new ();
+			pj_a (pj);
 			r_list_foreach (rs->regs, iter, r) {
-				r_cons_println (r->name);
+				if (use_json) {
+					pj_s (pj, r->name);
+				} else {
+					r_cons_println (r->name);
+				}
 			}
+			if (use_json) {
+				pj_end (pj);
+				const char *s = pj_string (pj);
+				r_cons_println (s);
+			}
+			pj_free (pj);
 		}
 	} break;
 	case '0': // "ar0"
@@ -7317,7 +7322,6 @@ static void cmd_anal_hint(RCore *core, const char *input) {
 		}
 		break;
 	case 'o': // "aho"
-		eprintf ("[WARNING] Former \"aho\" is deprecated and has been moved to \"ahd\".\n");
 		if (input[1] == ' ') {
 			const char *arg = r_str_trim_ro (input + 1);
 			int type = r_anal_optype_from_string (arg);
@@ -7509,7 +7513,6 @@ static void cmd_anal_hint(RCore *core, const char *input) {
 			r_anal_hint_clear (core->anal);
 		} break;
 	case 't': // "aht"
-		eprintf ("[WARNING] Former \"aht\" is deprecated and has been moved to \"aho\".\n");
 		switch (input[1]) {
 		case 's': { // "ahts"
 			char *off = strdup (input + 2);
@@ -8781,10 +8784,10 @@ static void cmd_anal_abt(RCore *core, const char *input) {
 			}
 			pj_end (pj);
 			r_cons_println (pj_string (pj));
-			pj_free (pj);
 			r_list_purge (paths);
 			free (paths);
 		}
+		pj_free (pj);
 	}
 	break;
 	case ' ': {

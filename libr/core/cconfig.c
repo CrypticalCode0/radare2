@@ -736,9 +736,7 @@ static bool cb_asmbits(void *user, void *data) {
 			r_bp_use (core->dbg->bp, asmarch, core->anal->bits);
 			r_config_set_i (core->config, "dbg.bpsize", r_bp_size (core->dbg->bp));
 		}
-	}
-	/* set pcalign */
-	{
+		/* set pcalign */
 		int v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_ALIGN);
 		r_config_set_i (core->config, "asm.pcalign", (v != -1)? v: 0);
 	}
@@ -1328,6 +1326,13 @@ static bool cb_dbg_unlibs(void *user, void *data) {
 	RConfigNode *node = (RConfigNode*) data;
 	free (core->dbg->glob_unlibs);
 	core->dbg->glob_unlibs = strdup (node->value);
+	return true;
+}
+
+static bool cb_dbg_bpinmaps(void *user, void *data) {
+	RCore *core = (RCore *) user;
+	RConfigNode *node = (RConfigNode *) data;
+	core->dbg->bp->bpinmaps = node->i_value;
 	return true;
 }
 
@@ -2065,7 +2070,7 @@ static bool cb_scrhighlight(void *user, void *data) {
 }
 
 #if __WINDOWS__
-static int scr_ansicon(void *user, void *data) {
+static bool scr_ansicon(void *user, void *data) {
 	RConfigNode *node = (RConfigNode *) data;
 	if (!strcmp (node->value, "true")) {
 		node->i_value = 1;
@@ -2254,15 +2259,6 @@ static bool cb_seggrn(void *user, void *data) {
 	return true;
 }
 
-static bool cb_cmtoff(void *user, void *data) {
-	RConfigNode *node = (RConfigNode *) data;
-	if (node->i_value || r_str_is_false (node->value)) {
-		free (node->value);
-		node->value = strdup (r_str_bool (node->i_value));
-	}
-	return true;
-}
-
 static bool cb_stopthreads(void *user, void *data) {
 	RCore *core = (RCore *) user;
 	RConfigNode *node = (RConfigNode *) data;
@@ -2294,6 +2290,12 @@ static bool cb_consbreak(void *user, void *data) {
 static bool cb_teefile(void *user, void *data) {
 	RConfigNode *node = (RConfigNode *) data;
 	r_cons_singleton ()->teefile = node->value;
+	return true;
+}
+
+static bool cb_onestream(void *user, void *data) {
+	RConfigNode *node = (RConfigNode *) data;
+	r_cons_singleton ()->onestream = node->i_value;
 	return true;
 }
 
@@ -2703,7 +2705,8 @@ static bool cb_linesabs(void *user, void *data) {
 	core->print->lines_abs = node->i_value;
 	if (core->print->lines_abs && core->print->lines_cache_sz <= 0) {
 		ut64 from = (ut64)r_config_get_i (core->config, "lines.from");
-		ut64 to = (ut64)r_config_get_i (core->config, "lines.to");
+		const char *to_str = r_config_get (core->config, "lines.to");
+		ut64 to = r_num_math (core->num, (to_str && *to_str) ? to_str : "$s");
 		core->print->lines_cache_sz = r_core_lines_initcache (core, from, to);
 		if (core->print->lines_cache_sz == -1) {
 			eprintf ("ERROR: \"lines.from\" and \"lines.to\" must be set\n");
@@ -2827,7 +2830,7 @@ R_API int r_core_config_init(RCore *core) {
 	{
 		char *pfx = r_sys_getenv("R2_PREFIX");
 #if __WINDOWS__
-		char *invoke_dir = r_sys_prefix (NULL);
+		const char *invoke_dir = r_sys_prefix (NULL);
 		if (!pfx && invoke_dir) {
 			pfx = strdup (invoke_dir);
 		}
@@ -3131,7 +3134,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF ("asm.marks", "true", "Show marks before the disassembly");
 	SETPREF ("asm.cmt.refs", "false", "Show flag and comments from refs in disasm");
 	SETPREF ("asm.cmt.patch", "false", "Show patch comments in disasm");
-	SETCB ("asm.cmt.off", "nodup", &cb_cmtoff, "Show offset comment in disasm (true, false, nodup)");
+	SETPREF ("asm.cmt.off", "nodup", "Show offset comment in disasm (true, false, nodup)");
 	SETPREF ("asm.payloads", "false", "Show payload bytes in disasm");
 
 	/* bin */
@@ -3294,7 +3297,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF ("dbg.slow", "false", "Show stack and regs in visual mode in a slow but verbose mode");
 	SETPREF ("dbg.funcarg", "false", "Display arguments to function call in visual mode");
 
-	SETPREF ("dbg.bpinmaps", "true", "Force breakpoints to be inside a valid map");
+	SETCB ("dbg.bpinmaps", "true", &cb_dbg_bpinmaps, "Activate breakpoints only if they are inside a valid map");
 	SETCB ("dbg.forks", "false", &cb_dbg_forks, "Stop execution if fork() is done (see dbg.threads)");
 	n = NODECB ("dbg.btalgo", "fuzzy", &cb_dbg_btalgo);
 	SETDESC (n, "Select backtrace algorithm");
@@ -3580,6 +3583,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETDESC (n, "Convert string before display");
 	SETOPTIONS (n, "asciiesc", "asciidot", NULL);
 	SETPREF ("scr.confirmquit", "false", "Confirm on quit");
+	SETCB ("scr.onestream", "false", &cb_onestream, "Force stderr output into stdout (works only if -DONE_STREAM_HACK=1)");
 
 	/* str */
 	SETCB ("str.escbslash", "false", &cb_str_escbslash, "Escape the backslash");

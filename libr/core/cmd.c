@@ -21,14 +21,16 @@
 #include <r_cmd.h>
 #include <stdint.h>
 #include <sys/types.h>
-#include <tree_sitter/api.h>
 #include <ctype.h>
 #include <stdarg.h>
 #if __UNIX__
 #include <sys/utsname.h>
 #endif
 
+#if USE_TREESITTER
+#include <tree_sitter/api.h>
 TSLanguage *tree_sitter_r2cmd ();
+#endif
 
 R_API void r_save_panels_layout(RCore *core, const char *_name);
 R_API void r_load_panels_layout(RCore *core, const char *_name);
@@ -1130,6 +1132,9 @@ static int cmd_join(void *data, const char *input) { // "join"
 		goto beach;
 	}
 	arg1 = r_str_trim_ro (arg1);
+	if (!arg1) {
+		goto beach;
+	}
 	char *end = strchr (arg1, ' ');
 	if (!end) {
 		goto beach;
@@ -1957,12 +1962,12 @@ static inline void print_dict(RCoreAutocomplete* a, int sub) {
 	}
 	int i, j;
 	const char* name = "unknown";
-	for (i = 0; i < a->n_subcmds; ++i) {
+	for (i = 0; i < a->n_subcmds; i++) {
 		RCoreAutocomplete* b = a->subcmds[i];
 		if (b->locked) {
 			continue;
 		}
-		for (j = 0; j < R_CORE_AUTOCMPLT_END; ++j) {
+		for (j = 0; j < R_CORE_AUTOCMPLT_END; j++) {
 			if (b->type == autocomplete_flags[j].type) {
 				name = autocomplete_flags[j].name;
 				break;
@@ -1975,7 +1980,7 @@ static inline void print_dict(RCoreAutocomplete* a, int sub) {
 
 static int autocomplete_type(const char* strflag) {
 	int i;
-	for (i = 0; i < R_CORE_AUTOCMPLT_END; ++i) {
+	for (i = 0; i < R_CORE_AUTOCMPLT_END; i++) {
 		if (autocomplete_flags[i].desc && !strncmp (strflag, autocomplete_flags[i].name, 5)) {
 			return autocomplete_flags[i].type;
 		}
@@ -1996,7 +2001,7 @@ static void cmd_autocomplete(RCore *core, const char *input) {
 		r_core_cmd_help (core, help_msg_triple_exclamation);
 		int i;
 		r_cons_printf ("|Types:\n");
-		for (i = 0; i < R_CORE_AUTOCMPLT_END; ++i) {
+		for (i = 0; i < R_CORE_AUTOCMPLT_END; i++) {
 			if (autocomplete_flags[i].desc) {
 				r_cons_printf ("| %s     %s\n",
 					autocomplete_flags[i].name,
@@ -2192,6 +2197,7 @@ static void r_w32_cmd_pipe(RCore *core, char *radare_cmd, char *shell_cmd) {
 	char *_shell_cmd = NULL;
 	LPTSTR _shell_cmd_ = NULL;
 	DWORD mode;
+	TCHAR *systemdir = NULL;
 	GetConsoleMode (GetStdHandle (STD_OUTPUT_HANDLE), &mode);
 
 	sa.nLength = sizeof (SECURITY_ATTRIBUTES);
@@ -2224,7 +2230,7 @@ static void r_w32_cmd_pipe(RCore *core, char *radare_cmd, char *shell_cmd) {
 	if (!_shell_cmd_) {
 		goto err_r_w32_cmd_pipe;
 	}
-	TCHAR *systemdir = calloc (MAX_PATH, sizeof (TCHAR));
+	systemdir = calloc (MAX_PATH, sizeof (TCHAR));
 	if (!systemdir) {
 		goto err_r_w32_cmd_pipe;
 	}
@@ -2445,6 +2451,9 @@ static int r_core_cmd_subst(RCore *core, char *cmd) {
 	 * nested call of this function */
 	ut64 orig_offset = core->offset;
 	icmd = strdup (cmd);
+	if (!icmd) {
+		goto beach;
+	}
 
 	if (core->max_cmd_depth - core->cons->context->cmd_depth == 1) {
 		core->prompt_offset = core->offset;
@@ -2591,8 +2600,9 @@ static void tmpenvs_free(void *item) {
 static bool set_tmp_arch(RCore *core, char *arch, char **tmparch) {
 	if (!tmparch) {
 		eprintf ("tmparch should be set\n");
+	} else {
+		*tmparch = strdup (r_config_get (core->config, "asm.arch"));
 	}
-	*tmparch = strdup (r_config_get (core->config, "asm.arch"));
 	r_config_set (core->config, "asm.arch", arch);
 	core->fixedarch = true;
 	return true;
@@ -2601,8 +2611,9 @@ static bool set_tmp_arch(RCore *core, char *arch, char **tmparch) {
 static bool set_tmp_bits(RCore *core, int bits, char **tmpbits) {
 	if (!tmpbits) {
 		eprintf ("tmpbits should be set\n");
+	} else {
+		*tmpbits = strdup (r_config_get (core->config, "asm.bits"));
 	}
-	*tmpbits = strdup (r_config_get (core->config, "asm.bits"));
 	r_config_set_i (core->config, "asm.bits", bits);
 	core->fixedbits = true;
 	return true;
@@ -4330,8 +4341,10 @@ out_finish:
 }
 
 R_API void run_pending_anal(RCore *core) {
-	// allow incall events in the run_pending step
-	core->ev->incall = false;
+	if (core && core->ev) {
+		// allow incall events in the run_pending step
+		core->ev->incall = false;
+	}
 	if (core && core->anal && core->anal->cmdtail) {
 		char *res = r_strbuf_drain (core->anal->cmdtail);
 		core->anal->cmdtail = r_strbuf_new (NULL);
@@ -4340,6 +4353,7 @@ R_API void run_pending_anal(RCore *core) {
 	}
 }
 
+#if USE_TREESITTER
 static inline bool is_ts_commands(TSNode node) {
 	return strcmp (ts_node_type (node), "commands") == 0;
 }
@@ -4464,10 +4478,15 @@ static bool core_cmd_tsr2cmd(RCore *core, const char *cstr, bool log) {
 	ts_parser_delete (parser);
 	return res;
 }
+#endif
 
 R_API int r_core_cmd(RCore *core, const char *cstr, int log) {
 	if (core->use_tree_sitter_r2cmd) {
+#if USE_TREESITTER
 		return core_cmd_tsr2cmd (core, cstr, log)? 0: 1;
+#else
+		R_LOG_WARN ("No compilation support for radare2-shell-parser\n");
+#endif
 	}
 
 	char *cmd, *ocmd, *ptr, *rcmd;

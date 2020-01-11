@@ -30,7 +30,7 @@ static ut64 binobj_a2b(RBinObject *o, ut64 addr) {
 	return o ? addr + o->baddr_shift : addr;
 }
 
-static void print_string(RBinFile *bf, RBinString *string, int raw) {
+static void print_string(RBinFile *bf, RBinString *string, int raw, PJ *pj) {
 	r_return_if_fail (bf && string);
 
 	int mode = bf->strmode;
@@ -57,13 +57,17 @@ static void print_string(RBinFile *bf, RBinString *string, int raw) {
 	switch (mode) {
 	case R_MODE_JSON:
 		{
-			PJ *pj = pj_new ();
 			if (pj) {
 				pj_o (pj);
+				pj_kn (pj, "vaddr", vaddr);
+				pj_kn (pj, "paddr", string->paddr);
+				pj_kn (pj, "ordinal", string->ordinal);
+				pj_kn (pj, "size", string->size);
+				pj_kn (pj, "length", string->length);
+				pj_ks (pj, "section", section_name);
+				pj_ks (pj, "type", type_string);
 				pj_ks (pj, "string", string->string);
 				pj_end (pj);
-				io->cb_printf ("%s\n", pj_string (pj));
-				pj_free (pj);
 			}
 		}
 		break;
@@ -138,6 +142,13 @@ static int string_scan_range(RList *list, RBinFile *bf, int min,
 	st64 vdelta = 0, pdelta = 0;
 	RBinSection *s = NULL;
 	bool ascii_only = false;
+	PJ *pj = NULL;
+	if (bf->strmode == R_MODE_JSON && !list) {
+		pj = pj_new ();
+		if (pj) {
+			pj_a (pj);
+		}
+	}
 	r_buf_read_at (bf->buf, from, buf, len);
 	// may oobread
 	while (needle < to) {
@@ -329,7 +340,7 @@ static int string_scan_range(RList *list, RBinFile *bf, int min,
 					ht_up_insert (bf->o->strings_db, bs->vaddr, bs);
 				}
 			} else {
-				print_string (bf, bs, raw);
+				print_string (bf, bs, raw, pj);
 				r_bin_string_free (bs);
 			}
 			if (from == 0 && to == bf->size) {
@@ -340,6 +351,14 @@ static int string_scan_range(RList *list, RBinFile *bf, int min,
 		ascii_only = false;
 	}
 	free (buf);
+	if (pj) {
+		pj_end (pj);
+		RIO *io = bin->iob.io;
+		if (io) {
+			io->cb_printf ("%s", pj_string (pj));
+		}
+		pj_free (pj);
+	}
 	return count;
 }
 

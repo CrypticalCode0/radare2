@@ -159,14 +159,12 @@ static inline PTHREAD_ITEM __find_thread(RDebug *dbg, int tid) {
 
 static PTHREAD_ITEM __r_debug_thread_add(RDebug *dbg, DWORD pid, DWORD tid, HANDLE hThread, LPVOID lpThreadLocalBase, LPVOID lpStartAddress, BOOL bFinished) {
 	r_return_val_if_fail (dbg, NULL);
-	PVOID startAddress = 0;
 	if (!dbg->threads) {
 		dbg->threads = r_list_newf (free);
 	}
 	if (!lpStartAddress) {
 		w32_NtQueryInformationThread (hThread, 9, &lpStartAddress, sizeof (LPVOID), NULL);
 	}
-	RListIter *it;
 	THREAD_ITEM th = {
 			pid,
 			tid,
@@ -358,8 +356,8 @@ static void __printwincontext(HANDLE th, CONTEXT *ctx) {
 	int x, nxmm = 0, nymm = 0;
 #if _WIN64
 	eprintf ("ControlWord   = %08x StatusWord   = %08x\n", ctx->FltSave.ControlWord, ctx->FltSave.StatusWord);
-	eprintf ("MxCsr         = %08x TagWord      = %08x\n", ctx->MxCsr, ctx->FltSave.TagWord);
-	eprintf ("ErrorOffset   = %08x DataOffset   = %08x\n", ctx->FltSave.ErrorOffset, ctx->FltSave.DataOffset);
+	eprintf ("MxCsr         = %08lx TagWord      = %08x\n", ctx->MxCsr, ctx->FltSave.TagWord);
+	eprintf ("ErrorOffset   = %08lx DataOffset   = %08lx\n", ctx->FltSave.ErrorOffset, ctx->FltSave.DataOffset);
 	eprintf ("ErrorSelector = %08x DataSelector = %08x\n", ctx->FltSave.ErrorSelector, ctx->FltSave.DataSelector);
 	for (x = 0; x < 8; x++) {
 		st[x].Low = ctx->FltSave.FloatRegisters[x].Low;
@@ -466,7 +464,7 @@ int w32_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 	return size;
 }
 
-static void __transfer_drx(RDebug *dbg, ut8 *buf) {
+static void __transfer_drx(RDebug *dbg, const ut8 *buf) {
 	CONTEXT cur_ctx;
 	if (w32_reg_read (dbg, R_REG_TYPE_ALL, (ut8 *)&cur_ctx, sizeof (CONTEXT))) {
 		CONTEXT *new_ctx = (CONTEXT *)buf;
@@ -721,9 +719,35 @@ static void __r_debug_lstLibAdd(DWORD pid, LPVOID lpBaseOfDll, HANDLE hFile, cha
 
 static bool breaked = false;
 
+int w32_attach_new_process(RDebug* dbg, int pid) {
+	int tid = -1;
+
+	if (!w32_detach(dbg, dbg->pid)) {
+		eprintf ("Failed to detach from (%d)\n", dbg->pid);
+		return -1;
+	}
+
+	if ((tid = w32_attach(dbg, pid)) < 0) {
+		eprintf ("Failed to attach to (%d)\n", pid);
+		return -1;
+	}
+
+	dbg->tid = tid;
+	dbg->pid = pid;
+	// Call select to sync the new pid's data
+	r_debug_select(dbg, pid, tid);
+	return dbg->tid;
+}
+
 int w32_select(RDebug* dbg, int pid, int tid) {
 	RListIter *it;
 	RIOW32Dbg *rio = dbg->user;
+
+	// Re-attach to a different pid
+	if (dbg->pid > -1 && dbg->pid != pid) {
+		return w32_attach_new_process (dbg, pid);
+	}
+
 	if (!dbg->threads) {
 		dbg->threads = r_list_newf (free);
 	}
@@ -796,10 +820,11 @@ int w32_kill(RDebug *dbg, int pid, int tid, int sig) {
 	return ret;
 }
 
-void w32_break_process(RDebug *dbg) {
+void w32_break_process(void *user) {
+	RDebug *dbg = (RDebug *)user;
 	RIOW32Dbg *rio = dbg->user;
 	if (dbg->corebind.cfggeti (dbg->corebind.core, "dbg.threads")) {
-		w32_select (dbg, rio->pi.dwProcessId, 0); // Suspend all threads
+		w32_select (dbg, rio->pi.dwProcessId, -1); // Suspend all threads
 	} else {
 		if (!w32_DebugBreakProcess (rio->pi.hProcess)) {
 			r_sys_perror ("w32_break_process/DebugBreakProcess");
@@ -1036,7 +1061,7 @@ int w32_dbg_wait(RDebug *dbg, int pid) {
 		default:
 			// This case might be reached if break doesn't trigger an event
 			if (ret != R_DEBUG_REASON_USERSUSP) {
-				eprintf ("(%d) unknown event: %d\n", pid, de.dwDebugEventCode);
+				eprintf ("(%d) unknown event: %lu\n", pid, de.dwDebugEventCode);
 				ret = -1;
 			}
 			goto end;
@@ -1299,7 +1324,7 @@ RDebugInfo *w32_info(RDebug *dbg, const char *arg) {
 	return rdi;
 }
 
-static RDebugPid *__build_debug_pid(int pid, HANDLE ph, const TCHAR* name) {
+static RDebugPid *__build_debug_pid(int pid, int ppid, HANDLE ph, const TCHAR* name) {
 	char *path = NULL;
 	int uid = -1;
 	if (!ph) {
@@ -1326,6 +1351,7 @@ static RDebugPid *__build_debug_pid(int pid, HANDLE ph, const TCHAR* name) {
 	}
 	// it is possible to get pc for a non debugged process but the operation is expensive and might be risky
 	RDebugPid *ret = r_debug_pid_new (path, pid, uid, 's', 0);
+	ret->ppid = ppid;
 	free (path);
 	return ret;
 }
@@ -1340,11 +1366,12 @@ RList *w32_pid_list(RDebug *dbg, int pid, RList *list) {
 	pe.dwSize = sizeof (pe);
 	if (Process32First (sh, &pe)) {
 		RIOW32Dbg *rio = dbg->user;
-		bool all = pid == 0, b = false;
+		bool all = pid == 0;
 		do {
-			if (all || pe.th32ProcessID == pid || (b = pe.th32ParentProcessID == pid)) {
+			if (all || pe.th32ProcessID == pid || pe.th32ParentProcessID == pid) {
 				// Returns NULL if process is inaccessible unless if its a child process of debugged process
-				RDebugPid *dbg_pid = __build_debug_pid (pe.th32ProcessID, b ? rio->pi.hProcess : NULL, pe.szExeFile);
+				RDebugPid *dbg_pid = __build_debug_pid (pe.th32ProcessID, pe.th32ParentProcessID,
+					dbg->pid == pe.th32ProcessID ? rio->pi.hProcess : NULL, pe.szExeFile);
 				if (dbg_pid) {
 					r_list_append (list, dbg_pid);
 				}
