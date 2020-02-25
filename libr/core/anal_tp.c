@@ -146,6 +146,7 @@ static void get_src_regname(RCore *core, ut64 addr, char *regname, int size) {
 	RAnal *anal = core->anal;
 	RAnalOp *op = r_core_anal_op (core, addr, R_ANAL_OP_MASK_VAL | R_ANAL_OP_MASK_ESIL);
 	if (!op || r_strbuf_is_empty (&op->esil)) {
+		r_anal_op_free (op);
 		return;
 	}
 	char *op_esil = strdup (r_strbuf_get (&op->esil));
@@ -390,11 +391,16 @@ static void type_match(RCore *core, ut64 addr, char *fcn_name, ut64 baddr, const
 					cmt_set = true;
 					if ((op->ptr && op->ptr != UT64_MAX) && !strcmp (name, "format")) {
 						RFlagItem *f = r_flag_get_i (core->flags, op->ptr);
-						if (f && !strncmp (f->name, "str", 3)) {
-							if ((types = parse_format (core, f->realname))) {
-								max += r_list_length (types);
+						if (f && f->space && !strcmp (f->space->name, R_FLAGS_FS_STRINGS)) {
+							char formatstr[0x200];
+							int read = r_io_nread_at (core->io, f->offset, (ut8 *)formatstr, R_MIN (sizeof (formatstr) - 1, f->size));
+							if (read > 0) {
+								formatstr[read] = '\0';
+								if ((types = parse_format (core, formatstr))) {
+									max += r_list_length (types);
+								}
+								format = true;
 							}
-							format = true;
 						}
 					}
 				}
@@ -453,6 +459,11 @@ static void type_match(RCore *core, ut64 addr, char *fcn_name, ut64 baddr, const
 	r_cons_break_pop ();
 }
 
+static int bb_cmpaddr(const void *_a, const void *_b) {
+	const RAnalBlock *a = _a, *b = _b;
+	return a->addr > b->addr ? 1 : (a->addr < b->addr ? -1 : 0);
+}
+
 R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 	RAnalBlock *bb;
 	RListIter *it;
@@ -503,6 +514,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 		return;
 	}
 	r_cons_break_push (NULL, NULL);
+	r_list_sort (fcn->bbs, bb_cmpaddr); // TODO: The algorithm can be more accurate if blocks are followed by their jmp/fail, not just by address
 	r_list_foreach (fcn->bbs, it, bb) {
 		ut64 addr = bb->addr;
 		int i = 0;
@@ -556,7 +568,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 					}
 				} else if (aop.ptr != UT64_MAX) {
 					RFlagItem *flag = r_flag_get_i (core->flags, aop.ptr);
-					if (flag && r_str_startswith (flag->realname, "imp.")) {
+					if (flag && flag->space && flag->space->name && !strcmp (flag->space->name, R_FLAGS_FS_IMPORTS) && flag->realname) {
 						full_name = flag->realname;
 						callee_addr = aop.ptr;
 					}
@@ -608,7 +620,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 				// Forward propgation of function return type
 				char src[REGNAME_SIZE] = {0};
 				const char *query = sdb_fmt ("%d.reg.write", cur_idx);
-				char *cur_dest = sdb_get (trace, query, 0);
+				const char *cur_dest = sdb_const_get (trace, query, 0);
 				get_src_regname (core, aop.addr, src, sizeof (src));
 				if (ret_reg && *src && strstr (ret_reg, src)) {
 					if (var && aop.direction == R_ANAL_OP_DIR_WRITE) {
@@ -642,7 +654,6 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 					}
 					free (foo);
 				}
-				free (cur_dest);
 			}
 			// Type propagation using instruction access pattern
 			if (var) {
@@ -685,7 +696,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 						if (!jmp_op) {
 							break;
 						}
-						if ((jmp_op->type == R_ANAL_OP_TYPE_RET && r_anal_bb_is_in_offset (jmpbb, jmp_addr))
+						if ((jmp_op->type == R_ANAL_OP_TYPE_RET && r_anal_block_contains (jmpbb, jmp_addr))
 								|| jmp_op->type == R_ANAL_OP_TYPE_CJMP) {
 							jmp = true;
 							r_anal_op_free (jmp_op);

@@ -290,7 +290,7 @@ static const char *help_msg_visual[] = {
 	"??", "show this help",
 	"$", "set the program counter to the current offset + cursor",
 	"%", "in cursor mode finds matching pair, otherwise toggle autoblocksz",
-	"^", "seek to the begining of the function",
+	"^", "seek to the beginning of the function",
 	"!", "enter into the visual panels mode",
 	"TAB", "switch to the next print mode (or element in cursor mode)",
 	"_", "enter the flag/comment/functions/.. hud (same as VF_)",
@@ -412,6 +412,7 @@ static void rotateAsmBits(RCore *core) {
 		bits = nb;
 		retries--;
 	}
+	r_anal_hint_free (hint);
 }
 
 static const char *rotateAsmemu(RCore *core) {
@@ -599,6 +600,7 @@ repeat:
 	switch (r_cons_readchar ()) {
 	case 'q':
 		r_strbuf_free (p);
+		r_strbuf_free (q);
 		return ret;
 	case '!':
 		r_core_visual_panels_root (core, core->panels_root);
@@ -1534,7 +1536,7 @@ repeat:
 			/* prepare highlight */
 			char *cmd = strdup (r_config_get (core->config, "scr.highlight"));
 			char *ats = r_str_newf ("%"PFMT64x, curat);
-			if (ats) {
+			if (ats && !*cmd) {
 				(void) r_config_set (core->config, "scr.highlight", ats);
 			}
 			/* print disasm */
@@ -1567,6 +1569,7 @@ repeat:
 		" JK  - step 10 rows\n"
 		" pP  - rotate between various print modes\n"
 		" :   - run r2 command\n"
+		" /   - highlight given word\n"
 		" ?   - show this help message\n"
 		" <>  - '<' for xrefs and '>' for refs\n"
 		" TAB - toggle between address and function references\n"
@@ -1593,6 +1596,9 @@ repeat:
 		if (printMode < 0) {
 			printMode = lastPrintMode;
 		}
+		goto repeat;
+	} else if (ch == '/') {
+		r_core_cmd0 (core, "?i highlight;e scr.highlight=`yp`");
 		goto repeat;
 	} else if (ch == 'x' || ch == '<') {
 		xref = true;
@@ -4150,7 +4156,7 @@ R_API void r_core_visual_disasm_down(RCore *core, RAsmOp *op, int *cols) {
 	f = r_anal_get_fcn_in (core->anal, core->offset, 0);
 	op->size = 1;
 	if (f && f->folded) {
-		*cols = core->offset - f->addr + r_anal_fcn_size (f);
+		*cols = core->offset - r_anal_function_max_addr (f);
 	} else {
 		r_asm_set_pc (core->assembler, core->offset);
 		*cols = r_asm_disassemble (core->assembler,

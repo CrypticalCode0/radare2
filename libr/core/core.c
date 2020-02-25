@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2009-2019 - pancake */
+/* radare2 - LGPL - Copyright 2009-2020 - pancake */
 
 #include <r_core.h>
 #include <r_socket.h>
@@ -244,7 +244,14 @@ static void setab(RCore *core, const char *arch, int bits) {
 
 static const char *getName(RCore *core, ut64 addr) {
 	RFlagItem *item = r_flag_get_i (core->flags, addr);
-	return item ? item->name : NULL;
+	if (item) {
+		if (core->flags->realnames) {
+			return item->realname
+				? item->realname: item->name;
+		}
+		return item->name;
+	}
+	return NULL;
 }
 
 static char *getNameDelta(RCore *core, ut64 addr) {
@@ -298,11 +305,11 @@ static bool __isMapped(RCore *core, ut64 addr, int perm) {
 	return r_io_map_is_mapped (core->io, addr);
 }
 
-static int __syncDebugMaps(RCore *core) {
+static bool __syncDebugMaps(RCore *core) {
 	if (r_config_get_i (core->config, "cfg.debug")) {
 		return r_debug_map_sync (core->dbg);
 	}
-	return 0;
+	return false;
 }
 
 R_API int r_core_bind(RCore *core, RCoreBind *bnd) {
@@ -505,7 +512,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 			if (!off) {
 				off = core->offset;
 			}
-			RAnalFunction *fcn = r_anal_get_fcn_at (core->anal, off, 0);
+			RAnalFunction *fcn = r_anal_get_function_at (core->anal, off);
 			if (fcn) {
 				if (ok) {
 					*ok = true;
@@ -786,8 +793,8 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 				switch (str[2]) {
 				/* function bounds (uppercase) */
 				case 'B': return fcn->addr; // begin
-				case 'E': return fcn->addr + fcn->_size; // end
-				case 'S': return (str[3]=='S')? r_anal_fcn_realsize (fcn): r_anal_fcn_size (fcn);
+				case 'E': return r_anal_function_max_addr (fcn); // end
+				case 'S': return (str[3]=='S') ? r_anal_function_realsize (fcn) : r_anal_function_linear_size (fcn);
 				case 'I': return fcn->ninstr;
 				/* basic blocks (lowercase) */
 				case 'b': return bbBegin (fcn, core->offset);
@@ -2013,10 +2020,9 @@ static int r_core_print_offsize(void *p, ut64 addr) {
 static int __disasm(void *_core, ut64 addr) {
 	RCore *core = _core;
 	ut64 prevaddr = core->offset;
-	int len;
 
 	r_core_seek (core, addr, true);
-	len = r_core_print_disasm_instructions (core, 0, 1);
+	int len = r_core_print_disasm_instructions (core, 0, 1);
 	r_core_seek (core, prevaddr, true);
 
 	return len;
@@ -2640,6 +2646,7 @@ R_API bool r_core_init(RCore *core) {
 			core->cons->line->user = core;
 			core->cons->line->cb_editor = \
 				(RLineEditorCb)&r_core_editor;
+			core->cons->line->cb_fkey = core->cons->cb_fkey;
 		}
 #if __EMSCRIPTEN__
 		core->cons->user_fgets = NULL;
@@ -2715,6 +2722,7 @@ R_API bool r_core_init(RCore *core) {
 	r_io_bind (core->io, &(core->print->iob));
 	r_io_bind (core->io, &(core->anal->iob));
 	r_io_bind (core->io, &(core->fs->iob));
+	r_cons_bind (&(core->fs->csb));
 	r_core_bind (core, &(core->fs->cob));
 	r_io_bind (core->io, &(core->bin->iob));
 	r_flag_bind (core->flags, &(core->anal->flb));
@@ -2780,8 +2788,20 @@ R_API bool r_core_init(RCore *core) {
 	return 0;
 }
 
+R_API void __cons_cb_fkey(RCore *core, int fkey) {
+	char buf[32];
+	snprintf (buf, sizeof (buf), "key.f%d", fkey);
+	const char *v = r_config_get (core->config, buf);
+	if (v && *v) {
+		r_cons_printf ("%s\n", v);
+		r_core_cmd0 (core, v);
+		r_cons_flush ();
+	}
+}
+
 R_API void r_core_bind_cons(RCore *core) {
 	core->cons->num = core->num;
+	core->cons->cb_fkey = (RConsFunctionKey)__cons_cb_fkey;
 	core->cons->cb_editor = (RConsEditorCallback)r_core_editor;
 	core->cons->cb_break = (RConsBreakCallback)r_core_break;
 	core->cons->cb_sleep_begin = (RConsSleepBeginCallback)r_core_sleep_begin;

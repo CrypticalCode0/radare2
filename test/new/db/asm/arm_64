@@ -158,6 +158,8 @@ a "ldrsh w3, [x8, 236]" 03d9c179
 a "ldrsh w3, [x8, x3]" 0369e378
 a "mov x20, x0" f40300aa
 a "mov x9, 5" a90080d2
+a "mov x7, 0x51" 270a80d2
+a "mov w19, 0x9a" 53138052
 a "movk x16, 15" f00180f2
 a "movn x6, 2" 46008092
 a "movz x1, 5" a10080d2
@@ -258,3 +260,5 @@ a "mrs x3, SP_EL0" 034138d5
 a "msr 0xc208, x3" 034118d5
 a "msr SP_EL0, x3" 034118d5
 a "msr sp_el0, x3" 034118d5
+a "cbnz w3, 0x1fffd4" a3feff35
+a "cbz x3, 0x1fffe8" 43ffffb4

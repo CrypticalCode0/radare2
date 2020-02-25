@@ -196,20 +196,32 @@ static ut32 mov(ArmOp *op) {
 		}
 	} else if (!strncmp (op->mnemonic, "mov", 3)) {
 		//printf ("%d - %d [%d]\n", op->operands[0].type, op->operands[1].type, ARM_GPR);
+		if (op->operands[0].reg_type & ARM_REG64) {
+            if (op->operands[1].reg_type & ARM_REG64) {
+                k = 0xe00300aa;
+            } else if (op->operands[1].type & ARM_CONSTANT) {
+                k = 0x80d2;
+            } else {
+                return data;
+            }
+        } else if (op->operands[0].reg_type & ARM_REG32) {
+            if (op->operands[1].reg_type & ARM_REG32) {
+                k = 0xe003002a;
+            } else if (op->operands[1].type & ARM_CONSTANT) {
+                k = 0x8052;
+            } else {
+                return data;
+            }
+        }
 		if (op->operands[0].type & ARM_GPR) {
-			if (op->operands[1].type & ARM_GPR) {
-				if (op->operands[1].reg_type & ARM_REG64) {
-					k = 0xe00300aa;
-				} else {
-					k = 0xe003002a;
-				}
-				data = k | op->operands[1].reg << 8;
-			} else if (op->operands[1].type & ARM_CONSTANT) {
-				k = 0x80d2;
-				data = k | op->operands[1].immediate << 29;
-			}
+            if (op->operands[1].type & ARM_GPR) {
+                data = k | op->operands[1].reg << 8;
+            } else if (op->operands[1].type & ARM_CONSTANT) {
+                ut32 imm = op->operands[1].immediate << 1;
+                data = k | ((imm & 0xf) << 28) | ((imm & 0x1f0) << 12) ;
+            }
 			data |=  op->operands[0].reg << 24;
-		}
+        }
 		return data;
 	}
 
@@ -220,6 +232,37 @@ static ut32 mov(ArmOp *op) {
 	data |= ((op->operands[1].immediate >> 10) << 7); // arg(1)
 	return data;
 }
+
+static ut32 cb(ArmOp *op) {
+	ut32 data = UT32_MAX;
+	int k = 0;
+    if (!strncmp (op->mnemonic, "cbnz", 4)) {
+        if (op->operands[0].reg_type & ARM_REG64) {
+            k =  0x000000b5;
+        } else if (op->operands[0].reg_type & ARM_REG32) {
+            k =  0x00000035;
+        } else {
+            return UT32_MAX;
+        }
+    } else if (!strncmp (op->mnemonic, "cbz", 3)) {
+        if (op->operands[0].reg_type & ARM_REG64) {
+            k =  0x000000b4;
+        } else if (op->operands[0].reg_type & ARM_REG32) {
+            k =  0x00000034;
+        } else {
+            return UT32_MAX;
+        }
+    } else {
+        return UT32_MAX;
+    }
+    //printf ("%s %d, %llu\n", op->mnemonic, op->operands[0].reg, op->operands[1].immediate);
+    ut32 imm = op->operands[1].immediate;
+	data = k | (op->operands[0].reg << 24) | ((imm & 0x1c) << 27) | ((imm & 0x1fe0) << 11);
+    data = data | ((imm & 0x1fe000) >> 5);
+
+	return data;
+}
+
 
 static ut32 cmp(ArmOp *op) {
 	ut32 data = UT32_MAX;
@@ -1021,6 +1064,10 @@ bool arm64ass(const char *str, ut64 addr, ut32 *op) {
 	/* TODO: write tests for this and move out the regsize logic into the mov */
 	if (!strncmp (str, "mov", 3)) {
 		*op = mov (&ops);
+		return *op != -1;
+	}
+	if (!strncmp (str, "cb", 2)) {
+		*op = cb (&ops);
 		return *op != -1;
 	}
 	if (!strncmp (str, "cmp", 3)) {

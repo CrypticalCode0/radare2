@@ -33,12 +33,13 @@ RUN
 
 NAME=seek undo/redo
 FILE=-
-CMDS=<<EXPECT
+CMDS=<<EOF
 wx 01
 s 1
 s-
 s+
 pb 8
+EOF
 EXPECT=<<EOF
 00000000
 EOF
@@ -53,7 +54,7 @@ EOF
 RUN
 
 NAME=r2 -V
-BROKEN=1 # Only at Windows
+BROKEN=1 # Only on Windows
 FILE=-
 CMDS=!!r2 -V~r_anal?
 EXPECT=<<EOF
@@ -62,7 +63,7 @@ EOF
 RUN
 
 NAME=r2 -h
-BROKEN=1 # Only at Windows
+BROKEN=1 # Only on Windows
 FILE=-
 CMDS=!!r2 -h~Usage?
 EXPECT=<<EOF
@@ -71,7 +72,7 @@ EOF
 RUN
 
 NAME=r2 -hh
-BROKEN=1 # Only at Windows
+BROKEN=1 # Only on Windows
 FILE=-
 CMDS=!!r2 -hh~R2_USER_PLUGINS?
 EXPECT=<<EOF
@@ -80,7 +81,7 @@ EOF
 RUN
 
 NAME=r2 -L
-BROKEN=1 # Only at Windows
+BROKEN=1 # Only on Windows
 FILE=-
 CMDS=!!r2 -L~default?
 EXPECT=<<EOF
@@ -88,9 +89,21 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME=ONE_STREAM sets scr.onestream
+NAME=no-nl-at-eof script
 FILE=-
-ONE_STREAM=1
-CMDS=e scr.onestream
-EXPECT=true
+CMDS=!radare2 -i scripts/no-nl-at-eof.r2 -NQ -
+EXPECT=1
+EXPECT_ERR=<<EOF
+EOF
+RUN
+
+NAME=radare2 -i -Q with missing script
+FILE=-
+CMDS=<<EOF
+# Should not hang
+!radare2 -i script/missing.r2 -NQ -
+EOF
+EXPECT=<<EOF
+EOF
+EXPECT_ERR=Script 'script/missing.r2' not found.
 RUN

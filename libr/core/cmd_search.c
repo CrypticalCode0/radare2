@@ -12,7 +12,7 @@ static int cmd_search(void *data, const char *input);
 #define USE_EMULATION 0
 
 static const char *help_msg_slash_m[] = {
-	"/m", "", "search for known magic patters",
+	"/m", "", "search for known magic patterns",
 	"/m", " [file]", "same as above but using the given magic file",
 	"/me", " ", "like ?e similar to IRC's /me",
 	"/mm", " ", "search for known filesystems and mount them automatically",
@@ -837,7 +837,7 @@ R_API RList *r_core_get_boundaries_prot(RCore *core, int perm, const char *mode,
 		RAnalFunction *f = r_anal_get_fcn_in (core->anal, core->offset,
 			R_ANAL_FCN_TYPE_FCN | R_ANAL_FCN_TYPE_SYM);
 		if (f) {
-			ut64 from = f->addr, size = r_anal_fcn_size (f);
+			ut64 from = f->addr, size = r_anal_function_size_from_entry (f);
 
 			/* Search only inside the basic block */
 			if (!strcmp (mode, "anal.bb")) {
@@ -3546,53 +3546,50 @@ reread:
 		dosearch = true;
 		break;
 	case 'w': // "/w" search wide string, includes ignorecase search functionality (/wi cmd)!
-		if (input[1]) {
-			if (input[2]) {
-				if (input[1] == 'j' || input[2] == 'j') {
-					param.outmode = R_MODE_JSON;
-				}
-				if (input[1] == 'i' || input[2] == 'i') {
-					ignorecase = true;
-				}
+		if (input[2] ) {
+			if (input[1] == 'j' || input[2] == 'j') {
+				param.outmode = R_MODE_JSON;
 			}
-
-			size_t shift = 1 + ignorecase;
-			if (param.outmode == R_MODE_JSON) {
-				shift++;
+			if (input[1] == 'i' || input[2] == 'i') {
+				ignorecase = true;
 			}
-			if (input[shift] == ' ') {
-				size_t strstart, len;
-				const char *p2;
-				char *p, *str;
-				strstart = shift + 1;
-				len = strlen (input + strstart);
-				str = calloc ((len + 1), 2);
-				for (p2 = input + strstart, p = str; *p2; p += 2, p2++) {
-					if (ignorecase) {
-						p[0] = tolower ((const ut8) *p2);
-					} else {
-						p[0] = *p2;
-					}
-					p[1] = 0;
-				}
-				r_search_reset (core->search, R_SEARCH_KEYWORD);
-				r_search_set_distance (core->search, (int)
-					r_config_get_i (core->config, "search.distance"));
-				RSearchKeyword *skw;
-				skw = r_search_keyword_new ((const ut8 *) str, len * 2, NULL, 0, NULL);
-				free (str);
-				if (skw) {
-					skw->icase = ignorecase;
-					r_search_kw_add (core->search, skw);
-					r_search_begin (core->search);
-					dosearch = true;
-				} else {
-					eprintf ("Invalid keyword\n");
-					break;
-				}
-			}
+		} else {
+			param.outmode = R_MODE_RADARE;
 		}
-		break;
+
+		size_t shift = 1 + ignorecase;
+		if (param.outmode == R_MODE_JSON) {
+			shift++;
+		}
+		size_t strstart;
+		const char *p2;
+		char *p;
+		strstart = shift + 1;
+		len = strlen (input + strstart);
+		inp = calloc ((len + 1), 2);
+		for (p2 = input + strstart, p = inp; *p2; p += 2, p2++) {
+			if (ignorecase) {
+				p[0] = tolower ((const ut8) *p2);
+			} else {
+				p[0] = *p2;
+			}
+			p[1] = 0;
+		}
+		r_search_reset (core->search, R_SEARCH_KEYWORD);
+		r_search_set_distance (core->search, (int)
+				r_config_get_i (core->config, "search.distance"));
+		RSearchKeyword *skw;
+		skw = r_search_keyword_new ((const ut8 *) inp, len * 2, NULL, 0, NULL);
+		free (inp);
+		if (skw) {
+			skw->icase = ignorecase;
+			r_search_kw_add (core->search, skw);
+			r_search_begin (core->search);
+			dosearch = true;
+		} else {
+			eprintf ("Invalid keyword\n");
+			break;
+		}
 	case 'i': // "/i"
 		if (input[param_offset - 1] != ' ') {
 			eprintf ("Missing ' ' after /i\n");
@@ -3601,7 +3598,7 @@ reread:
 		}
 		ignorecase = true;
 	case 'j': // "/j"
-		if (input[0] == 'j') {
+		if (input[0] == 'j' && input[1] == ' ') {
 			param.outmode = R_MODE_JSON;
 		}
 		// fallthrough
@@ -3724,7 +3721,7 @@ reread:
 			if (input[1]) {
 				addr = r_num_math (core->num, input + 2);
 			} else {
-				RAnalFunction *fcn = r_anal_get_fcn_at (core->anal, addr, 0);
+				RAnalFunction *fcn = r_anal_get_function_at (core->anal, addr);
 				if (fcn) {
 					addr = fcn->addr;
 				} else {

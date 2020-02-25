@@ -68,7 +68,7 @@ RUN
 NAME='dbg.dc+ds.hwstep2'
 FILE=../bins/elf/analysis/x86-helloworld-gcc
 ARGS=-d
-CMDS=<<EXPECT
+CMDS=<<EOF
 e scr.color=0
 e dbg.swstep=false
 db sym.main
@@ -78,6 +78,7 @@ ds
 dr PC
 p8 1@sym.main
 dk 9
+EOF
 EXPECT=<<EOF
 0x08048400
 0x08048401
@@ -197,24 +198,28 @@ EOF
 RUN
 
 NAME='valid db'
-FILE=../bins/elf/analysis/x86-helloworld-gcc
+FILE=../bins/elf/analysis/x64-loop
 ARGS=-d
 CMDS=<<EOF
-db 0x0
-db~1[12];
-EXPECT=<<RUN
-"invalid"
+e scr.color=0
+db main
+db~1[8]
+EOF
+EXPECT=<<EOF
+valid
 EOF
 RUN
 
 NAME='invalid db'
-FILE=../bins/elf/analysis/x86-helloworld-gcc
+FILE=../bins/elf/analysis/x64-loop
 ARGS=-d
 CMDS=<<EOF
-db entry0
-db~1[12]
-EXPECT=<<RUN
-"valid"
+e scr.color=0
+db 0x0
+db~1[8]
+EOF
+EXPECT=<<EOF
+invalid
 EOF
 RUN
 
@@ -245,5 +250,18 @@ EXPECT=<<EOF
 ----------
 0 E:1
 Hello world!
+EOF
+RUN
+
+NAME='dbH'
+FILE=../bins/elf/analysis/x64-loop
+ARGS=-d
+CMDS=<<EOF
+e scr.color=0
+dbH main
+db~1[5]
+EOF
+EXPECT=<<EOF
+hw
 EOF
 RUN

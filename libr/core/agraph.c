@@ -239,7 +239,7 @@ static void update_node_dimension(const RGraph *g, int is_mini, int zoom, int ed
 }
 
 static void append_shortcut (const RAGraph *g, char *title, char *nodetitle, int left) {
-	char *shortcut = sdb_get (g->db, sdb_fmt ("agraph.nodes.%s.shortcut", nodetitle), 0);
+	const char *shortcut = sdb_const_get (g->db, sdb_fmt ("agraph.nodes.%s.shortcut", nodetitle), 0);
 	if (shortcut) {
 		if (g->can->color) {
 			// XXX: do not hardcode color here
@@ -247,7 +247,6 @@ static void append_shortcut (const RAGraph *g, char *title, char *nodetitle, int
 		} else {
 			strncat (title, sdb_fmt ("[o%s]", shortcut), left);
 		}
-		free (shortcut);
 	}
 }
 
@@ -2121,8 +2120,11 @@ static char *get_body(RCore *core, ut64 addr, int size, int opts) {
 
 	bool html = r_config_get_i (core->config, "scr.html");
 	r_config_set_i (core->config, "scr.html", 0);
-	body = r_core_cmd_strf (core,
-			"%s %d @ 0x%08"PFMT64x, cmd, size, addr);
+	if (r_config_get_i (core->config, "graph.aeab")) {
+		body = r_core_cmd_strf (core, "%s 0x%08"PFMT64x, "aeab", addr);
+	} else {
+		body = r_core_cmd_strf (core, "%s %d @ 0x%08"PFMT64x, cmd, size, addr);
+	}
 	r_config_set_i (core->config, "scr.html", html);
 
 	// restore original options
@@ -2152,8 +2154,8 @@ static char *get_bb_body(RCore *core, RAnalBlock *b, int opts, RAnalFunction *fc
 	char *body = get_body (core, b->addr, b->size, opts);
 	if (b->jump != UT64_MAX) {
 		if (b->jump > b->addr) {
-			RAnalBlock *jumpbb = r_anal_bb_get_jumpbb (fcn, b);
-			if (jumpbb) {
+			RAnalBlock *jumpbb = r_anal_get_block_at (b->anal, b->jump);
+			if (jumpbb && r_list_contains (jumpbb->fcns, fcn)) {
 				if (emu && core->anal->last_disasm_reg != NULL && !jumpbb->parent_reg_arena) {
 					jumpbb->parent_reg_arena = r_reg_arena_dup (core->anal->reg, core->anal->last_disasm_reg);
 				}
@@ -2165,8 +2167,8 @@ static char *get_bb_body(RCore *core, RAnalBlock *b, int opts, RAnalFunction *fc
 	}
 	if (b->fail != UT64_MAX) {
 		if (b->fail > b->addr) {
-			RAnalBlock *failbb = r_anal_bb_get_failbb (fcn, b);
-			if (failbb) {
+			RAnalBlock *failbb = r_anal_get_block_at (b->anal, b->fail);
+			if (failbb && r_list_contains (failbb->fcns, fcn)) {
 				if (emu && core->anal->last_disasm_reg != NULL && !failbb->parent_reg_arena) {
 					failbb->parent_reg_arena = r_reg_arena_dup (core->anal->reg, core->anal->last_disasm_reg);
 				}
@@ -2322,7 +2324,7 @@ static int get_bbnodes(RAGraph *g, RCore *core, RAnalFunction *fcn) {
 			if (!curbb) {
 				curbb = bb;
 			}
-			if (r_anal_bb_is_in_offset (bb, core->offset)) {
+			if (r_anal_block_contains (bb, core->offset)) {
 				curbb = bb;
 				break;
 			}

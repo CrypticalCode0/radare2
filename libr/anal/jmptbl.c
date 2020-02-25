@@ -290,12 +290,12 @@ R_API bool try_get_jmptbl_info(RAnal *anal, RAnalFunction *fcn, ut64 addr, RAnal
 
 	RAnalHint *hint = r_anal_hint_get (anal, addr);
 	if (hint) {
-		if (hint->val != UT64_MAX) {
-			*table_size = hint->val;
-		}
-		eprintf ("TMPAPVAL %llx, %llx\n", addr, tmp_aop.val);
+		ut64 val = hint->val;
 		r_anal_hint_free (hint);
-		return true;
+		if (val != UT64_MAX) {
+			*table_size = val;
+			return true;
+		}
 	}
 
 	for (i = 0; i < prev_bb->op_pos_size; i++) {
@@ -322,7 +322,7 @@ R_API bool try_get_jmptbl_info(RAnal *anal, RAnalFunction *fcn, ut64 addr, RAnal
 		if (tmp_aop.val == UT64_MAX && tmp_aop.refptr == 0) {
 			isValid = true;
 			*table_size = 0;
-		} else if (tmp_aop.refptr == 0) {
+		} else if (tmp_aop.refptr == 0 || tmp_aop.val != UT64_MAX) {
 			isValid = tmp_aop.val < 0x200;
 			*table_size = tmp_aop.val + 1;
 		} else {

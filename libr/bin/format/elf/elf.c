@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2008-2019 - nibble, pancake, alvaro_fe */
+/* radare - LGPL - Copyright 2008-2020 - nibble, pancake, alvaro_fe */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -801,7 +801,10 @@ static Sdb *store_versioninfo_gnu_versym(ELFOBJ *bin, Elf_(Shdr) *shdr, int sz) 
 							goto beach;
 						}
 						const char *name = bin->strtab + vda.vda_name;
-						sdb_set (sdb, key, sdb_fmt ("%s(%s%-*s)", tmp_val, name, (int)(12 - strlen (name)),")") , 0);
+						if (name) {
+							const char *fname = sdb_fmt ("%s(%s%-*s)", tmp_val, name, (int)(12 - strlen (name)),")");
+							sdb_set (sdb, key, fname, 0);
+						}
 					}
 				}
 			}
@@ -3361,6 +3364,7 @@ RBinSymbol *Elf_(_r_bin_elf_convert_symbol)(struct Elf_(r_bin_elf_obj_t) *bin,
 	ptr->forwarder = "NONE";
 	ptr->bind = symbol->bind;
 	ptr->type = symbol->type;
+	ptr->is_imported = symbol->is_imported;
 	ptr->paddr = paddr;
 	ptr->vaddr = vaddr;
 	ptr->size = symbol->size;
@@ -3527,9 +3531,9 @@ static RBinElfSymbol* Elf_(_r_bin_elf_get_symbols_imports)(ELFOBJ *bin, int type
 					}
 				}
 				ret[ret_ctr].size = tsize;
-				if (sym[k].st_name + 2 > strtab_section->sh_size) {
+				if (sym[k].st_name + 1 > strtab_section->sh_size) {
 					bprintf ("index out of strtab range\n");
-					goto beach;
+					continue;
 				}
 				{
 					int rest = ELF_STRING_LENGTH - 1;
@@ -3952,9 +3956,8 @@ char *Elf_(r_bin_elf_compiler)(ELFOBJ *bin) {
 	if (!section) {
 		return NULL;
 	}
-
 	ut64 off = section->offset;
-	int sz = section->size;
+	ut32 sz = R_MIN (section->size, 128);
 	if (sz < 1) {
 		return NULL;
 	}
@@ -3966,20 +3969,14 @@ char *Elf_(r_bin_elf_compiler)(ELFOBJ *bin) {
 		free (buf);
 		return NULL;
 	}
-
+	const size_t buflen = strlen (buf);
+	char *nullbyte = buf + buflen;
+	if (nullbyte[1] && buflen < sz) {
+		nullbyte[0] = ' ';
+	}
 	buf[sz] = 0;
-	char *ptr = buf;
-
-	do {
-		char *p = strchr (ptr, '\0');
-		size_t psz = (p - ptr);
-		ptr = p;
-		sz -= psz + 1;
-		if (sz > 1) {
-			*ptr = '/';
-			ptr++;
-		}
-	} while (sz > 0);
-
-	return buf;
+	r_str_trim (buf);
+	char * res = r_str_escape (buf);
+	free (buf);
+	return res;
 }

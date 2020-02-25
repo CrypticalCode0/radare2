@@ -51,12 +51,12 @@ static void config_print_value_json(RConfig *cfg, RConfigNode *node) {
 		val = "0";
 	}
 	char *sval = r_str_escape (val);
-	if (node->flags & CN_BOOL || node->flags & CN_INT || node->flags & CN_OFFT) {
+	if (r_config_node_is_bool (node) || r_config_node_is_int (node)) {
 		if (!strncmp (val, "0x", 2)) {
 			ut64 n = r_num_get (NULL, val);
 			cfg->cb_printf ("%"PFMT64d, n);
-		} else if (r_str_isnumber (val) || r_str_is_bool (val)) {
-			cfg->cb_printf ("%s", val);
+		} else if (r_str_isnumber (val) || (*val /* HACK */ && r_str_is_bool (val))) {
+			cfg->cb_printf ("%s", val);  // TODO: always use true/false for bool json str
 		} else {
 			cfg->cb_printf ("\"%s\"", sval);
 		}
@@ -84,7 +84,7 @@ static void config_print_node(RConfig *cfg, RConfigNode *node, const char *pfx, 
 				cfg->cb_printf ("\"desc\":\"%s\",", es);
 				free (es);
 			}
-			cfg->cb_printf ("\"ro\":%s", node->flags & CN_RO ? "true" : "false");
+			cfg->cb_printf ("\"ro\":%s", r_str_bool (r_config_node_is_ro (node)));
 			if (!r_list_empty (node->options)) {
 				isFirst = true;
 				cfg->cb_printf (",\"options\":[");
@@ -111,7 +111,7 @@ static void config_print_node(RConfig *cfg, RConfigNode *node, const char *pfx, 
 		if (verbose) {
 			cfg->cb_printf ("%s%s = %s%s %s; %s", pfx,
 				node->name, node->value, sfx, 
-				node->flags & CN_RO ? "(ro)" : "", 
+				r_config_node_is_ro (node) ? "(ro)" : "",
 				node->desc);
 			if (!r_list_empty (node->options)) {
 				isFirst = true;
@@ -300,7 +300,7 @@ R_API const char* r_config_get(RConfig *cfg, const char *name) {
 		if (node->getter) {
 			node->getter (cfg->user, node);
 		}
-		if (node->flags & CN_BOOL) {
+		if (r_config_node_is_bool (node)) {
 			return r_str_bool (r_str_is_true (node->value));
 		}
 		return node->value;
@@ -312,7 +312,7 @@ R_API const char* r_config_get(RConfig *cfg, const char *name) {
 
 R_API bool r_config_toggle(RConfig *cfg, const char *name) {
 	RConfigNode *node = r_config_node_get (cfg, name);
-	if (node && node->flags & CN_BOOL) {
+	if (node && r_config_node_is_bool (node)) {
 		(void)r_config_set_i (cfg, name, !node->i_value);
 		return true;
 	}
@@ -337,20 +337,19 @@ R_API ut64 r_config_get_i(RConfig *cfg, const char *name) {
 }
 
 R_API const char* r_config_node_type(RConfigNode *node) {
-	if (node) {
-		int f = node->flags;
-		if (f & CN_BOOL) {
-			return "bool";
+	r_return_val_if_fail (node, "");
+
+	if (r_config_node_is_bool (node)) {
+		return "bool";
+	}
+	if (r_config_node_is_str (node)) {
+		return "str";
+	}
+	if (r_config_node_is_int (node)) {
+		if (!strncmp (node->value, "0x", 2)) {
+			return "addr";
 		}
-		if (f & CN_STR) {
-			return "str";
-		}
-		if (f & CN_OFFT || f & CN_INT) {
-			if (!strncmp (node->value, "0x", 2)) {
-				return "addr";
-			}
-			return "int";
-		}
+		return "int";
 	}
 	return "";
 }
@@ -386,7 +385,7 @@ R_API RConfigNode* r_config_set(RConfig *cfg, const char *name, const char *valu
 
 	node = r_config_node_get (cfg, name);
 	if (node) {
-		if (node->flags & CN_RO) {
+		if (r_config_node_is_ro (node)) {
 			eprintf ("(error: '%s' config key is read only)\n", name);
 			return node;
 		}
@@ -400,7 +399,7 @@ R_API RConfigNode* r_config_set(RConfig *cfg, const char *name, const char *valu
 			free (node->value);
 			node->value = strdup ("");
 		}
-		if (node->flags & CN_BOOL) {
+		if (r_config_node_is_bool (node)) {
 			bool b = r_str_is_true (value);
 			node->i_value = b? 1: 0;
 			char *value = strdup (r_str_bool (b));
@@ -418,22 +417,15 @@ R_API RConfigNode* r_config_set(RConfig *cfg, const char *name, const char *valu
 					goto beach;
 				}
 				free (node->value);
-				if (r_str_is_false (value)) {
-					node->value = strdup ("false");
-					node->i_value = 0;
-				} else if (r_str_is_true (value)) {
-					node->value = strdup ("true");
-					node->i_value = 1;
-				} else {
-					node->value = strdup (value);
-					node->i_value = 2;
-				}
+				node->value = strdup (value);
 				if (IS_DIGIT (*value) || (value[0] == '-' && IS_DIGIT (value[1]))) {
 					if (strchr (value, '/')) {
 						node->i_value = r_num_get (cfg->num, value);
 					} else {
 						node->i_value = r_num_math (cfg->num, value);
 					}
+				} else {
+					node->i_value = 0;
 				}
 				node->flags |= CN_INT;
 			}
@@ -501,7 +493,7 @@ R_API bool r_config_rm(RConfig *cfg, const char *name) {
 }
 
 R_API void r_config_node_value_format_i(char *buf, size_t buf_size, const ut64 i, R_NULLABLE RConfigNode *node) {
-	if (node && node->flags & CN_BOOL) {
+	if (node && r_config_node_is_bool (node)) {
 		r_str_ncpy (buf, r_str_bool ((int) i), buf_size);
 		return;
 	}
@@ -517,7 +509,7 @@ R_API RConfigNode* r_config_set_i(RConfig *cfg, const char *name, const ut64 i) 
 	r_return_val_if_fail (cfg && name, NULL);
 	RConfigNode *node = r_config_node_get (cfg, name);
 	if (node) {
-		if (node->flags & CN_RO) {
+		if (r_config_node_is_ro (node)) {
 			node = NULL;
 			goto beach;
 		}
@@ -528,7 +520,6 @@ R_API RConfigNode* r_config_set_i(RConfig *cfg, const char *name, const ut64 i) 
 			node = NULL;
 			goto beach;
 		}
-		//node->flags = CN_RW | CN_INT;
 		node->i_value = i;
 	} else {
 		if (!cfg->lock) {
@@ -538,7 +529,7 @@ R_API RConfigNode* r_config_set_i(RConfig *cfg, const char *name, const ut64 i) 
 				node = NULL;
 				goto beach;
 			}
-			node->flags = CN_RW | CN_OFFT;
+			node->flags = CN_RW | CN_INT;
 			node->i_value = i;
 			ht_pp_insert (cfg->ht, node->name, node);
 			if (cfg->nodes) {
@@ -687,7 +678,7 @@ R_API void r_config_free(RConfig *cfg) {
 
 R_API void r_config_visual_hit_i(RConfig *cfg, const char *name, int delta) {
 	RConfigNode *node = r_config_node_get (cfg, name);
-	if (node && (node->flags & CN_INT || node->flags & CN_OFFT)) {
+	if (node && r_config_node_is_int (node)) {
 		(void)r_config_set_i (cfg, name, r_config_get_i (cfg, name) + delta);
 	}
 }
