@@ -51,7 +51,7 @@ static inline void handle_jump_instruction(RAnalOp *op, ut64 addr, cs_m68k *m68k
 
 	// Handle PC relative mode jump
 	if (m68k->operands[0].address_mode == M68K_AM_PCI_DISP) {
-		op->jump = make_64bits_address (addr + m68k->operands[0].mem.disp + 2);
+		op->jump = make_64bits_address (addr + m68k->operands[0].mem.disp + 2); //the mem.disp is depending on the opcode 2, 4 or 6 bytes size.
 	} else {
 		op->jump = make_64bits_address (m68k->operands[0].imm);
 	}
@@ -187,6 +187,9 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	if (a->cpu && strstr (a->cpu, "68010")) {
 		mode |= CS_MODE_M68K_010; //limited to 16M
 	}
+	if (a->cpu && strstr (a->cpu, "CPU32")) {
+		mode |= CS_MODE_MK68K_020; //embedded CPU without some addressing modes
+	}
 	if (a->cpu && strstr (a->cpu, "68020")) {
 		mode |= CS_MODE_M68K_020; //limited to 4G, EC only has 16M
 	}
@@ -245,10 +248,10 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 		op->type  = R_ANAL_OP_TYPE_AND;
 		break;
 	case M68K_INS_ASL:
-		op->type  = R_ANAL_OP_TYPE_SHL;
+		op->type  = R_ANAL_OP_TYPE_SAL;
 		break;
 	case M68K_INS_ASR:
-		op->type  = R_ANAL_OP_TYPE_SHR;
+		op->type  = R_ANAL_OP_TYPE_SAR;
 		break;
 	case M68K_INS_ABCD:
 		break;
@@ -271,7 +274,7 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 		handle_branch_instruction (op, addr, m68k, R_ANAL_OP_TYPE_CJMP, 0);
 		break;
 	case M68K_INS_BRA:
-		handle_branch_instruction (op, addr, m68k, R_ANAL_OP_TYPE_JMP, 0);
+		handle_branch_instruction (op, addr, m68k, R_ANAL_OP_TYPE_JMP, 0); //branch always is condition AL
 		break;
 	case M68K_INS_BSR:
 		handle_branch_instruction (op, addr, m68k, R_ANAL_OP_TYPE_CALL, 0);
@@ -279,7 +282,10 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_BCHG:
 	case M68K_INS_BCLR:
 	case M68K_INS_BSET:
+		break;
 	case M68K_INS_BTST:
+		op->type = R_ANAL_OP_TYPE_CMP;
+		break;
 	case M68K_INS_BFCHG:
 	case M68K_INS_BFCLR:
 	case M68K_INS_BFEXTS:
@@ -287,18 +293,41 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_BFFFO:
 	case M68K_INS_BFINS:
 	case M68K_INS_BFSET:
+		break;
 	case M68K_INS_BFTST:
+		op->type = R_ANAL_OP_TYPE_CMP;
 		break;
 	case M68K_INS_BKPT: //break point
-		op->type = R_ANAL_OP_TYPE_ILL; //should TRAP to illegal instruction
+		op->type = R_ANAL_OP_TYPE_TRAP;
 		break;
 	case M68K_INS_CALLM: //call module 68020 only instruction
+		op->type = R_ANAL_OP_TYPE_CALL;
+		break;
 	case M68K_INS_CAS:
-	case M68K_INS_CAS2:
-	case M68K_INS_CHK:
+	case M68K_INS_CAS2: //this should get transposed into a handler subroutine
+		/*op->cond = R_ANAL_COND_EQ;
+		op->type = R_ANAL_OP_TYPE_XCHG;*/
+		op->type = R_ANAL_OP_TYPE_SYNC;
+		op->family = R_ANAL_OP_FAMILY_THREAD;
+		break;
+	case M68K_INS_CHK: //this should get transposed in to a handler subroutine
+		/*if(op->cond = R_ANAL_COND_LE, true) {
+			op->type = R_ANAL_OP_TYPE_TRAP;
+			break;
+		}
+		op->type = R_ANAL_OP_TYPE_SUB;
+		elseif(op->cond = R_ANAL_COND_GT, true) {
+			op->type = R_ANAL_OP_TYPE_TRAP;
+			break;
+		}
+		else {
+			break;
+		}*/
 	case M68K_INS_CHK2:
+		op->type = R_ANAL_OP_TYPE_TRAP;
+		break;
 	case M68K_INS_CLR:
-		// TODO:
+		op->type = R_ANAL_OP_TYPE_MOV;
 		break;
 	case M68K_INS_CMP:
 	case M68K_INS_CMPA:
@@ -310,11 +339,13 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_CINVL:
 	case M68K_INS_CINVP:
 	case M68K_INS_CINVA:
-		op->type = R_ANAL_OP_TYPE_ILL; //this is incorrect because this depends on CPU model and supervisor bit
+		op->type = R_ANAL_OP_TYPE_UNK; //this is incorrect because this depends on CPU model and supervisor bit
+		op->family = R_ANAL_OP_FAMILY_PRIV;
 		break;
 	case M68K_INS_CPUSHL:
 	case M68K_INS_CPUSHP:
 	case M68K_INS_CPUSHA:
+		op->family = R_ANAL_OP_FAMILY_PRIV;
 		break;
 	case M68K_INS_DBT:
 	case M68K_INS_DBF:
@@ -354,6 +385,9 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_FABS:
 	case M68K_INS_FSABS:
 	case M68K_INS_FDABS:
+		op->type = R_ANAL_OP_TYPE_ABS;
+		op->family = R_ANAL_OP_FAMILY_FPU;
+		break;
 	case M68K_INS_FACOS:
 		op->type = R_ANAL_OP_TYPE_UNK;
 		op->family = R_ANAL_OP_FAMILY_FPU;
@@ -361,10 +395,10 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_FADD:
 	case M68K_INS_FSADD:
 	case M68K_INS_FDADD:
-	case M68K_INS_FASIN:
 		op->type = R_ANAL_OP_TYPE_ADD;
 		op->family = R_ANAL_OP_FAMILY_FPU;
 		break;
+	case M68K_INS_FASIN:
 	case M68K_INS_FATAN:
 	case M68K_INS_FATANH:
 		op->type = R_ANAL_OP_TYPE_UNK;
@@ -643,9 +677,12 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_MOVEM:
 	case M68K_INS_MOVEP:
 	case M68K_INS_MOVEQ:
-	case M68K_INS_MOVES: //supervisor mode instruction, move space depending od DFC or SFC 
-	case M68K_INS_MOVE16:
+	case M68K_INS_MOVE16: //68040 instruction
 		op->type = R_ANAL_OP_TYPE_MOV;
+		break;
+	case M68K_INS_MOVES: //supervisor mode instruction, move space depending on DFC or SFC
+		op->type = R_ANAL_OP_TYPE_MOV;
+		op->family = R_ANAL_FAMILY_PRIV;
 		break;
 	case M68K_INS_MULS:
 	case M68K_INS_MULU:
@@ -700,7 +737,8 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 		op->type = R_ANAL_OP_TYPE_RET;
 		break;
 	case M68K_INS_SBCD:
-	case M68K_INS_ST:
+		break;
+/*	case M68K_INS_ST:
 	case M68K_INS_SF:
 	case M68K_INS_SHI:
 	case M68K_INS_SLS:
@@ -718,6 +756,8 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_SLT:
 	case M68K_INS_SGT:
 	case M68K_INS_SLE:
+		op->type = R_ANAL_OP_TYPE_COND;
+		break;*/
 	case M68K_INS_STOP:
 		break;
 	case M68K_INS_SUB:
@@ -733,6 +773,8 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_TAS:
 		break;
 	case M68K_INS_TRAP:
+		op->type = R_ANAL_OP_TYPE_TRAP;
+		break;
 	case M68K_INS_TRAPV:
 	case M68K_INS_TRAPT:
 	case M68K_INS_TRAPF:
@@ -752,7 +794,7 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_TRAPLT:
 	case M68K_INS_TRAPGT:
 	case M68K_INS_TRAPLE:
-		op->type = R_ANAL_OP_TYPE_TRAP;
+		op->type = R_ANAL_OP_TYPE_CTRAP;
 		break;
 	case M68K_INS_TST:
 		op->type = R_ANAL_OP_TYPE_CMP;
@@ -802,36 +844,54 @@ static int set_reg_profile(RAnal *anal) {
 		"gpr	a5	.32	52	0\n"
 		"gpr	a6 	.32	56	0\n"
 		"gpr	a7 	.32	60	0\n" //pseudo register alias is one of the following 3 registers
-        "gpr	usp	.32	64	0\n" //user stack pointer, this is an shadow register of A7 user mode, SR bit 0x2000 is 0
-        "gpr	msp	.32	68	0\n" //master stack pointer, this is an shadow register of A7 supervisor mode, SR bits 0x3000 are set
-		"gpr	isp	.32	72	0\n" //interrupt stack pointer, this is an shadow register of A7  supervisor mode, SR bit 0x2000 is set.
-        "gpr	pc 	.32	76	0\n"
-        "gpr	sr 	.16	78	0\n" //only available for read and write access during supervisor mode 16bit
-        "gpr	ccr .8	78	0\n" //subset of the SR, available from any mode
-		"gpr	fp0	.80 80	0\n" //FPU register 0, 96bits to write and read max
-		"gpr	fp1	.80	90	0\n" //FPU register 1, 96bits to write and read max
-		"gpr	fp2	.80	100	0\n" //FPU register 2, 96bits to write and read max
-		"gpr	fp3 .80	110	0\n" //FPU register 3, 96bits to write and read max
-		"gpr	fp4 .80	120	0\n" //FPU register 4, 96bits to write and read max
-		"gpr	fp5 .80	130	0\n" //FPU register 5, 96bits to write and read max
-		"gpr	fp6 .80	140	0\n" //FPU register 6, 96bits to write and read max
-		"gpr	fp7 .80	150	0\n" //FPU register 7, 96bits to write and read max
-		"gpr	sfc .32	160	0\n" //source function code register
-		"gpr	dfc	.32	164	0\n" //destination function code register
-		"gpr	vbr	.32	168	0\n" //vector base register, this is a Address pointer
-		"gpr	cacr	.32	172	0\n" //cache control register, implementation specific
-		"gpr	caar	.32	176	0\n" //cache address register, 68020, 68EC020, 68030 and 68EC030 only.  
-		"gpr	tc	.32	180	0\n"
-		"gpr	itt0	.32	184	0\n" //in 68EC040 this is IACR0
-		"gpr	itt1	.32	188	0\n" //in 68EC040 this is IACR1
-		"gpr	dtt0	.32	192	0\n" //in 68EC040 this is DACR0
-		"gpr	dtt1	.32	196	0\n" //in 68EC040 this is DACR1
-		"gpr	mmusr	.32	200	0\n"
-		"gpr	urp	.32	204	0\n"
-		"gpr	srp	.32	208	0\n"
-		"gpr	fpcr	.32	212	0\n"
-		"gpr	fpsr	.32	216	0\n"
-		"gpr	fpiar	.32	220	0\n";
+    "gpr	usp	.32	64	0\n" //user stack pointer, this is an shadow register of A7 user mode, SR bit 0x2000 is 0
+    "priv	msp	.32	68	0\n" //master stack pointer, this is an shadow register of A7 supervisor mode, SR bits 0x3000 are set
+		"priv	isp	.32	72	0\n" //interrupt stack pointer, this is an shadow register of A7  supervisor mode, SR bit 0x2000 is set.
+    "gpr	pc 	.32	76	0\n" //32 bit on the 68000, of which only 24 can lead out, careful with modulo!
+		"gpr	ccr .8	78	0\n" //Subset of the SR, available from any mode, contains flags.
+		"gpr  C   .1 .624 0\n" //Carry Flag.
+		"gpr  V   .1 .625 0\n" //Overflow Flag.
+		"gpr  Z   .1 .626 0\n" //Zero Flag.
+		"gpr  N   .1 .627 0\n" //Negative Flag.
+		"gpr  X   .1 .628 0\n" //Extend Flag.
+		"priv	sr 	.16	78	0\n" //only available for read and write access during supervisor mode 16bit
+		"priv ipm .3 .632 0\n" //interrupt priority mask.
+		"priv M		.1 .636 0\n" //Master/interrupt SP.
+		"priv S		.1 .627 0\n" //Supervisor/User State.
+		"priv te	.2 .628 0\n" //Trace Enable.
+    "fpu	fp0	.80 80	0\n" //FPU register 0, 96bits to write and read max
+		"fpu	fp1	.80	90	0\n" //FPU register 1, 96bits to write and read max
+		"fpu	fp2	.80	100	0\n" //FPU register 2, 96bits to write and read max
+		"fpu	fp3 .80	110	0\n" //FPU register 3, 96bits to write and read max
+		"fpu	fp4 .80	120	0\n" //FPU register 4, 96bits to write and read max
+		"fpu	fp5 .80	130	0\n" //FPU register 5, 96bits to write and read max
+		"fpu	fp6 .80	140	0\n" //FPU register 6, 96bits to write and read max
+		"fpu	fp7 .80	150	0\n" //FPU register 7, 96bits to write and read max
+		"fpu	fpcr .16 160 0\n" //floating point control register.
+		"fpu	rnd	.2 .1284 0\n" //rounding mode.
+		"fpu	prec .2 .1286 0\n" //rounding precision
+		"fpu  inex .2 .1288 0\n" //inexact, 0x1 Decimal input, 0x2 operation.
+		"fpu	DZ	.1 .1290 0\n" //Divide by Zero Enable.
+		"fpu	UNFL .1 .1291 0\n" //Underflow Enable.
+		"fpu	OVFL .1 .1292 0\n" //Overflow Enable.
+		"fpu	OPERR .1 .1293 0\n" //Operation Error Enable.
+		"fpu	SNAN .1 .1294 0\n" //Signaling NOT A NUMBER Enable.
+		"fpu	BSUN .1 .1295 0\n" //Branch/Set on Unordered Enable.
+		"fpu	fpsr .32 162 0\n" //floating point status register.
+		"fpu	fpiar .32 166 0\n" //floating point instruction address register.
+		"priv	sfc .3	170	0\n" //source function code register, a 3 bit register.
+		"priv	dfc	.3	171	0\n" //destination function code register, a 3 bit register.
+		"priv	vbr	.32	172	0\n" //vector base register, this is a Address pointer
+		"priv	cacr .32 176 0\n" //cache control register, implementation specific
+		"priv	caar .32 180 0\n" //cache address register, 68020, 68EC020, 68030 and 68EC030 only.
+		"priv	tc	.32	184	0\n"
+		"priv	itt0 .32	188	0\n" //in 68EC040 this is IACR0
+		"priv	itt1 .32	192	0\n" //in 68EC040 this is IACR1
+		"priv	dtt0 .32	296	0\n" //in 68EC040 this is DACR0
+		"priv	dtt1 .32	200	0\n" //in 68EC040 this is DACR1
+		"priv	mmusr .32	204	0\n"
+		"priv	urp	.32	208	0\n"
+		"priv	srp	.32	212	0\n";
 	return r_reg_set_profile_string (anal->reg, p);
 }
 
