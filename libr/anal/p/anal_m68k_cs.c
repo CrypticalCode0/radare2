@@ -562,6 +562,10 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 		op->type = R_ANAL_OP_TYPE_SHR;
 		break;
 	case M68K_INS_PEA:
+		op->type = R_ANAL_OP_TYPE_MOV;
+		op->type = R_ANAL_OP_TYPE_PUSH;
+		op->stackop = R_ANAL_STACK_INC;
+		break;
 	case M68K_INS_LEA:
 		op->type = R_ANAL_OP_TYPE_LEA;
 		break;
@@ -574,11 +578,11 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 		op->type = R_ANAL_OP_TYPE_MOV;
 		break;
 	case M68K_INS_MOVEC:
-    case M68K_INS_MOVES:
-        op->type = R_ANAL_OP_FAMILY_PRIV;
-        op->type = R_ANAL_OP_TYPE_MOV;
-        break;
-    case M68K_INS_MULS:
+    	case M68K_INS_MOVES:
+        	op->type = R_ANAL_OP_FAMILY_PRIV;
+        	op->type = R_ANAL_OP_TYPE_MOV;
+        	break;
+    	case M68K_INS_MULS:
 	case M68K_INS_MULU:
 		op->type = R_ANAL_OP_TYPE_MUL;
 		break;
@@ -597,7 +601,7 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 		op->type = R_ANAL_OP_TYPE_OR;
 		break;
 	case M68K_INS_PACK:
-        break;
+        	break;
 	case M68K_INS_PFLUSH:
 	case M68K_INS_PFLUSHA:
 	case M68K_INS_PFLUSHAN:
@@ -614,7 +618,7 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 	case M68K_INS_REMS:
 	case M68K_INS_REMU:
 	case M68K_INS_RESET:
-        op->type = R_ANAL_OP_FAMILY_PRIV;
+        	op->type = R_ANAL_OP_FAMILY_PRIV;
 		break;
 	case M68K_INS_ROL:
 		op->type = R_ANAL_OP_TYPE_ROL;
@@ -632,10 +636,10 @@ static int analop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAn
 		op->type = R_ANAL_OP_TYPE_RET;
 		break;
 	case M68K_INS_RTE:
-        op->type = R_ANAL_OP_TYPE_RET;
-        op->type = R_ANAL_OP_FAMILY_PRIV;
-        break
-    case M68K_INS_SBCD:
+        	op->type = R_ANAL_OP_TYPE_RET;
+        	op->type = R_ANAL_OP_FAMILY_PRIV;
+        	break;
+    	case M68K_INS_SBCD:
 	case M68K_INS_ST:
 	case M68K_INS_SF:
 	case M68K_INS_SHI:
@@ -799,7 +803,6 @@ static int set_reg_profile(RAnal *anal) {
 			"priv	mmusr	.32	218	0\n"
 			"priv	urp	.64	222	0\n"
 			"priv	srp	.64	230	0\n";
-		default: p =
 		case 68020+FPU: p =
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
 			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
