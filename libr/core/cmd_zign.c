@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2019 - pancake, nibble */
+/* radare - LGPL - Copyright 2009-2020 - pancake, nibble */
 
 #include <r_core.h>
 #include <r_anal.h>
@@ -121,11 +121,11 @@ static bool addFcnBytes(RCore *core, RAnalFunction *fcn, const char *name) {
 
 static bool addFcnGraph(RCore *core, RAnalFunction *fcn, const char *name) {
 	RSignGraph graph = {
-		.cc = r_anal_fcn_cc (core->anal, fcn),
+		.cc = r_anal_function_complexity (fcn),
 		.nbbs = r_list_length (fcn->bbs)
 	};
 	// XXX ebbs doesnt gets initialized if calling this from inside the struct
-	graph.edges = r_anal_fcn_count_edges (fcn, &graph.ebbs);
+	graph.edges = r_anal_function_count_edges (fcn, &graph.ebbs);
 	graph.bbsum = r_anal_function_realsize (fcn);
 	return r_sign_add_graph (core->anal, name, graph);
 }
@@ -504,7 +504,7 @@ out_case_manual:
 			int n = 0;
 			bool retval = true;
 
-			args = r_str_new (r_str_trim_ro (input + 1));
+			args = r_str_new (r_str_trim_head_ro (input + 1));
 			n = r_str_word_set0 (args);
 
 			if (n > 2) {
@@ -815,7 +815,9 @@ static void addFlag(RCore *core, RSignItem *it, ut64 addr, int size, int count, 
 		char *fcnstr_copy = strdup (fcnstr);
 		fcn = r_anal_get_fcn_in (core->anal, it->addr, 0);
 		if (fcn) {
-			const char *fcn_name = strrchr (r_str_trim_tail (strtok (fcnstr_copy, "(")), ' ');
+			char *arg = strtok (fcnstr_copy, "(");
+			r_str_trim_tail (arg);
+			const char *fcn_name = strrchr (arg, ' ');
 			// __setFunctionName() ; cmd_anal.c:2535 ; Expand into R_API function
 			free (fcn->name);
 			fcn->name = strdup (fcn_name + 1);
@@ -853,7 +855,8 @@ static int searchHitCB(RSignItem *it, RSearchKeyword *kw, ut64 addr, void *user)
 static int fcnMatchCB(RSignItem *it, RAnalFunction *fcn, void *user) {
 	struct ctxSearchCB *ctx = (struct ctxSearchCB *) user;
 	// TODO(nibble): use one counter per metric zign instead of ctx->count
-	addFlag (ctx->core, it, fcn->addr, r_anal_function_realsize (fcn), ctx->count, ctx->prefix, ctx->rad);
+	ut64 sz = r_anal_function_realsize (fcn);
+	addFlag (ctx->core, it, fcn->addr, sz, ctx->count, ctx->prefix, ctx->rad);
 	ctx->count++;
 	return 1;
 }
@@ -1235,13 +1238,13 @@ static int cmd_zign(void *data, const char *input) {
 	case '\0':
 	case '*':
 	case 'q':
-	case 'j':
+	case 'j': // "zj"
 		r_sign_list (core->anal, input[0]);
 		break;
-	case 'k':
+	case 'k': // "zk"
 		r_core_cmd0 (core, "k anal/zigns/*");
 		break;
-	case '-':
+	case '-': // "z-"
 		r_sign_delete (core->anal, input + 1);
 		break;
 	case '.': // "z."

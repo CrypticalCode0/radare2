@@ -356,8 +356,8 @@ static int cmd_eval(void *data, const char *input) {
 			v = strchr (k, '=');
 			if (v) {
 				*v++ = 0;
-				r_str_trim_head_tail (k);
-				r_str_trim_head_tail (v);
+				r_str_trim (k);
+				r_str_trim (v);
 				r_sys_setenv (k, v);
 			}
 			free (k);
@@ -446,7 +446,7 @@ static int cmd_eval(void *data, const char *input) {
 			char *word = NULL;
 			int argc = 0;
 			int delta = (input[2])? 3: 2;
-			char** argv = r_str_argv (r_str_trim_ro (input + delta), &argc);
+			char** argv = r_str_argv (r_str_trim_head_ro (input + delta), &argc);
 			switch (input[2]) {
 			case '?': {
 				const char *helpmsg[] = {
@@ -478,6 +478,10 @@ static int cmd_eval(void *data, const char *input) {
 				return false;
 			case '\0':
 				r_meta_list (core->anal, R_META_TYPE_HIGHLIGHT, 0);
+				r_str_argv_free (argv);
+				return false;
+			case 'j':
+				r_meta_list (core->anal, R_META_TYPE_HIGHLIGHT, 'j');
 				r_str_argv_free (argv);
 				return false;
 			case '*':
@@ -595,7 +599,7 @@ static int cmd_eval(void *data, const char *input) {
 		}
 		break;
 	case '!': // "e!"
-		input = r_str_trim_ro (input + 1);
+		input = r_str_trim_head_ro (input + 1);
 		if (!r_config_toggle (core->config, input)) {
 			eprintf ("r_config: '%s' is not a boolean variable.\n", input);
 		}

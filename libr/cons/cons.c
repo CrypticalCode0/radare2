@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2008-2019 - pancake, Jody Frankowski */
+/* radare2 - LGPL - Copyright 2008-2020 - pancake, Jody Frankowski */
 
 #include <r_cons.h>
 #include <r_util.h>
@@ -152,6 +152,9 @@ static inline void __cons_write_ll(const char *buf, int len) {
 static inline void __cons_write(const char *obuf, int olen) {
 	const unsigned int bucket = 64 * 1024;
 	unsigned int i;
+	if (olen < 0) {
+		olen = strlen (obuf);
+	}
 	for (i = 0; (i + bucket) < olen; i += bucket) {
 		__cons_write_ll (obuf + i, bucket);
 	}
@@ -680,7 +683,7 @@ R_API void r_cons_clear00() {
 }
 
 R_API void r_cons_reset_colors() {
-	r_cons_strcat (Color_RESET);
+	r_cons_strcat (Color_RESET_BG Color_RESET);
 }
 
 R_API void r_cons_clear() {
@@ -926,7 +929,7 @@ R_API void r_cons_flush(void) {
 			r_cons_break_push (NULL, NULL);
 			while (nl && !r_cons_is_breaked ()) {
 				__cons_write (ptr, nl - ptr + 1);
-				if (!(i % pagesize)) {
+				if (I.linesleep && !(i % pagesize)) {
 					r_sys_usleep (I.linesleep * 1000);
 				}
 				ptr = nl + 1;
@@ -1026,7 +1029,7 @@ R_API void r_cons_visual_write(char *buffer) {
 	}
 	memset (&white, ' ', sizeof (white));
 	while ((nl = strchr (ptr, '\n'))) {
-		int len = ((int)(size_t)(nl-ptr))+1;
+		int len = ((int)(size_t)(nl - ptr)) + 1;
 		int lines_needed = 0;
 
 		*nl = 0;
@@ -1048,6 +1051,7 @@ R_API void r_cons_visual_write(char *buffer) {
 			if (lines > 0) {
 				__cons_write (pptr, plen);
 				if (len != olen) {
+					__cons_write (R_CONS_CLEAR_FROM_CURSOR_TO_END, -1);
 					__cons_write (Color_RESET, strlen (Color_RESET));
 				}
 			}
@@ -1195,14 +1199,19 @@ R_API void r_cons_newline() {
 	if (!I.null) {
 		r_cons_strcat ("\n");
 	}
-// This place is wrong to manage the color reset, can interfire with r2pipe output sending resetchars
-//  and break json output appending extra chars.
-// this code now is managed into output.c:118 at function r_cons_w32_print
-// now the console color is reset with each \n (same stuff do it here but in correct place ... i think)
-//#if __WINDOWS__
-	//r_cons_reset_colors();
-//#endif
-	//if (I.is_html) r_cons_strcat ("<br />\n");
+#if 0
+This place is wrong to manage the color reset, can interfire with r2pipe output sending resetchars
+and break json output appending extra chars.
+this code now is managed into output.c:118 at function r_cons_w32_print
+now the console color is reset with each \n (same stuff do it here but in correct place ... i think)
+
+#if __WINDOWS__
+	r_cons_reset_colors();
+#else
+	r_cons_strcat (Color_RESET_ALL"\n");
+#endif
+	if (I.is_html) r_cons_strcat ("<br />\n");
+#endif
 }
 
 /* return the aproximated x,y of cursor before flushing */

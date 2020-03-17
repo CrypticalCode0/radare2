@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2019 - nibble, pancake */
+/* radare - LGPL - Copyright 2009-2020 - nibble, pancake */
 #if 0
 * Use RList
 * Support callback for null command (why?)
@@ -27,9 +27,18 @@
 #include <sys/utsname.h>
 #endif
 
+// NOTE: this should be in sync with SPECIAL_CHARACTERS in
+//       radare2-shell-parser grammar, except for ", ' and
+//       whitespaces, because we let cmd_substitution_arg create
+//       new arguments
+static const char *SPECIAL_CHARS_REGULAR = "@;~$#|`\"'()<>";
+
 #if USE_TREESITTER
 #include <tree_sitter/api.h>
 TSLanguage *tree_sitter_r2cmd ();
+
+static const char *SPECIAL_CHARS_DOUBLE_QUOTED = "\"";
+static const char *SPECIAL_CHARS_SINGLE_QUOTED = "'";
 #endif
 
 R_API void r_save_panels_layout(RCore *core, const char *_name);
@@ -259,6 +268,7 @@ static const char *help_msg_r[] = {
 	"r", " size", "expand or truncate file to given size",
 	"r-", "num", "remove num bytes, move following data down",
 	"r+", "num", "insert num bytes, move following data up",
+	"rb", "oldbase @ newbase", "rebase all flags, bin.info, breakpoints and analysis",
 	"rm" ," [file]", "remove file",
 	"rh" ,"", "show size in human format",
 	"r2" ," [file]", "launch r2 (same for rax2, rasm2, ...)",
@@ -327,6 +337,24 @@ static const char *help_msg_vertical_bar[] = {
 
 R_API void r_core_cmd_help(const RCore *core, const char *help[]) {
 	r_cons_cmd_help (help, core->print->flags & R_PRINT_FLAGS_COLOR);
+}
+
+struct duplicate_flag_t {
+	RList *ret;
+	const char *word;
+};
+
+static bool duplicate_flag(RFlagItem *flag, void *u) {
+	struct duplicate_flag_t *user = (struct duplicate_flag_t *)u;
+	/* filter per flag spaces */
+	if (r_str_glob (flag->name, user->word)) {
+		RFlagItem *cloned_item = r_flag_item_clone (flag);
+		if (!cloned_item) {
+			return false;
+		}
+		r_list_append (user->ret, cloned_item);
+	}
+	return true;
 }
 
 static void recursive_help_go(RCore *core, int detail, RCmdDescriptor *desc) {
@@ -436,7 +464,7 @@ static int cmd_uniq(void *data, const char *input) { // "uniq"
 	RCore *core = (RCore *)data;
 	const char *arg = strchr (input, ' ');
 	if (arg) {
-		arg = r_str_trim_ro (arg + 1);
+		arg = r_str_trim_head_ro (arg + 1);
 	}
 	switch (*input) {
 	case '?': // "uniq?"
@@ -467,11 +495,11 @@ static int cmd_head (void *data, const char *_input) { // "head"
 	char *arg = strchr (input, ' ');
 	char *tmp, *count;
 	if (arg) {
-		arg = (char *)r_str_trim_ro (arg + 1); 	// contains "count filename"
+		arg = (char *)r_str_trim_head_ro (arg + 1); 	// contains "count filename"
 		count = strchr (arg, ' ');
 		if (count) {
 			*count = 0;	// split the count and file name
-			tmp = (char *)r_str_trim_ro (count + 1);
+			tmp = (char *)r_str_trim_head_ro (count + 1);
 			lines = atoi (arg);
 			arg = tmp;
 		}
@@ -807,7 +835,7 @@ static int cmd_rap(void *data, const char *input) {
 		if (input[1] == '?') {
 			r_core_cmd_help (core, help_msg_equalh);
 		} else {
-			const char *arg = r_str_trim_ro (input + 1);
+			const char *arg = r_str_trim_head_ro (input + 1);
 			r_core_rtr_http (core, getArg (input[1], 'H'), 'H', arg);
 		}
 		break;
@@ -889,7 +917,7 @@ static int cmd_yank(void *data, const char *input) {
 	case 't': // "wt"
 		if (input[1] == 'f') { // "wtf"
 			ut64 tmpsz;
-			const char *file = r_str_trim_ro (input + 2);
+			const char *file = r_str_trim_head_ro (input + 2);
 			const ut8 *tmp = r_buf_data (core->yank_buf, &tmpsz);
 			if (!r_file_dump (file, tmp, tmpsz, false)) {
 				eprintf ("Cannot dump to '%s'\n", file);
@@ -1019,7 +1047,7 @@ R_API bool r_core_run_script(RCore *core, const char *file) {
 			sdb_query_lines (core->anal->sdb_types, out);
 			free (out);
 		}
-		ret = out? true: false;
+		ret = out != NULL;
 	} else {
 		p = r_lang_get_by_extension (core->lang, file);
 		if (p) {
@@ -1146,7 +1174,7 @@ static int cmd_ls(void *data, const char *input) { // "ls"
 	RCore *core = (RCore *)data;
 	const char *arg = strchr (input, ' ');
 	if (arg) {
-		arg = r_str_trim_ro (arg + 1);
+		arg = r_str_trim_head_ro (arg + 1);
 	}
 	switch (*input) {
 	case '?': // "l?"
@@ -1184,7 +1212,7 @@ static int cmd_join(void *data, const char *input) { // "join"
 	if (!arg1) {
 		goto beach;
 	}
-	arg1 = r_str_trim_ro (arg1);
+	arg1 = r_str_trim_head_ro (arg1);
 	if (!arg1) {
 		goto beach;
 	}
@@ -1197,7 +1225,7 @@ static int cmd_join(void *data, const char *input) { // "join"
 	if (!arg2) {
 		goto beach;
 	}
-	arg2 = r_str_trim_ro (arg2);
+	arg2 = r_str_trim_head_ro (arg2);
 	switch (*input) {
 	case '?': // "join?"
 		goto beach;
@@ -1272,7 +1300,7 @@ static int cmd_interpret(void *data, const char *input) {
 			// same as \n with e cmd.repeat=true
 			lastcmd_repeat (core, 1);
 		} else if (input[1]) {
-			char *str = r_core_cmd_str_pipe (core, r_str_trim_ro (input));
+			char *str = r_core_cmd_str_pipe (core, r_str_trim_head_ro (input));
 			if (str) {
 				r_core_cmd (core, str, 0);
 				free (str);
@@ -1283,7 +1311,7 @@ static int cmd_interpret(void *data, const char *input) {
 		break;
 	case '*': // ".*"
 		{
-			const char *a = r_str_trim_ro (input + 1);
+			const char *a = r_str_trim_head_ro (input + 1);
 			char *s = strdup (a);
 			char *sp = strchr (s, ' ');
 			if (sp) {
@@ -1304,7 +1332,7 @@ static int cmd_interpret(void *data, const char *input) {
 		break;
 	case ' ': // ". "
 		{
-			const char *script_file = r_str_trim_ro (input + 1);
+			const char *script_file = r_str_trim_head_ro (input + 1);
 			if (*script_file == '$') {
 				r_core_cmd0 (core, script_file);
 			} else {
@@ -1403,7 +1431,6 @@ static int cmd_kuery(void *data, const char *input) {
 	char buf[1024], *out;
 	RCore *core = (RCore*)data;
 	const char *sp, *p = "[sdb]> ";
-	const int buflen = sizeof (buf) - 1;
 	Sdb *s = core->sdb;
 
 	char *cur_pos, *cur_cmd, *next_cmd = NULL;
@@ -1503,7 +1530,7 @@ static int cmd_kuery(void *data, const char *input) {
 		r_line_set_hist_callback (line, &r_line_hist_sdb_up, &r_line_hist_sdb_down);
 		for (;;) {
 			r_line_set_prompt (p);
-			if (r_cons_fgets (buf, buflen, 0, NULL) < 1) {
+			if (r_cons_fgets (buf, sizeof (buf), 0, NULL) < 1) {
 				break;
 			}
 			if (!*buf) {
@@ -1715,6 +1742,26 @@ static bool cmd_r2cmd(RCore *core, const char *_input) {
 	return true;
 }
 
+static int cmd_rebase(RCore *core, const char *input) {
+	ut64 addr = r_num_math (core->num, input);
+	if (!addr) {
+		r_cons_printf ("Usage: rb oldbase @ newbase\n");
+		return 0;
+	}
+	// old base = addr
+	// new base = core->offset
+	r_debug_bp_rebase (core->dbg, addr, core->offset);
+	r_bin_set_baddr (core->bin, core->offset);
+	r_flag_move (core->flags, addr, core->offset);
+	r_core_cmd0 (core, ".is*");
+	r_core_cmd0 (core, ".iM*");
+	r_core_cmd0 (core, ".ii*");
+	r_core_cmd0 (core, ".iz*");
+	// TODO: r_anal_move :??
+	// TODO: differentiate analysis by map ranges (associated with files or memory maps)
+	return 0;
+}
+
 static int cmd_resize(void *data, const char *input) {
 	RCore *core = (RCore *)data;
 	ut64 newsize = 0;
@@ -1732,13 +1779,16 @@ static int cmd_resize(void *data, const char *input) {
 			__runMain (core->r_main_radare2, input - 1);
 		}
 		return true;
+	case 'b': // "rb" rebase
+		return cmd_rebase (core, input + 1);
 	case '2': // "r2" // XXX should be handled already in cmd_r2cmd()
 		// TODO: use argv[0] instead of 'radare2'
+		// TODO: { char **argv = { "r2", NULL }; r_main_radare2 (1, argv); }
 		r_sys_cmdf ("radare%s", input);
 		return true;
 	case 'm': // "rm"
 		if (input[1] == ' ') {
-			const char *file = r_str_trim_ro (input + 2);
+			const char *file = r_str_trim_head_ro (input + 2);
 			if (*file == '$') {
 				r_cmd_alias_del (core->rcmd, file);
 			} else {
@@ -1950,7 +2000,7 @@ static int cmd_pointer(void *data, const char *input) {
 	RCore *core = (RCore*) data;
 	int ret = true;
 	char *str, *eq;
-	input = r_str_trim_ro (input);
+	input = r_str_trim_head_ro (input);
 	while (*input == ' ') {
 		input++;
 	}
@@ -2044,7 +2094,7 @@ static int autocomplete_type(const char* strflag) {
 
 static void cmd_autocomplete(RCore *core, const char *input) {
 	RCoreAutocomplete* b = core->autocomplete;
-	input = r_str_trim_ro (input);
+	input = r_str_trim_head_ro (input);
 	char arg[256];
 	if (!*input) {
 		print_dict (core->autocomplete, 0);
@@ -2073,7 +2123,7 @@ static void cmd_autocomplete(RCore *core, const char *input) {
 		return;
 	}
 	while (b) {
-		const char* end = r_str_trim_wp (input);
+		const char* end = r_str_trim_head_wp (input);
 		if (!end) {
 			break;
 		}
@@ -2088,7 +2138,7 @@ static void cmd_autocomplete(RCore *core, const char *input) {
 		memcpy (arg, input, end - input);
 		arg[end - input] = 0;
 		RCoreAutocomplete* a = r_core_autocomplete_find (b, arg, true);
-		input = r_str_trim_ro (end);
+		input = r_str_trim_head_ro (end);
 		if (input && *input && !a) {
 			if (b->type == R_CORE_AUTOCMPLT_DFLT && !(b = r_core_autocomplete_add (b, arg, R_CORE_AUTOCMPLT_DFLT, false))) {
 				eprintf ("ENOMEM\n");
@@ -2232,6 +2282,22 @@ static int cmd_system(void *data, const char *input) {
 		break;
 	}
 	return ret;
+}
+
+static char *unescape_special_chars(char *s, const char *special_chars) {
+	char *dst = R_NEWS (char, strlen (s) + 1);
+	int i, j = 0;
+
+	for (i = 0; s[i]; i++) {
+		if (s[i] != '\\' || !strchr (special_chars, s[i + 1])) {
+			dst[j++] = s[i];
+			continue;
+		}
+		dst[j++] = s[i + 1];
+		i++;
+	}
+	dst[j++] = '\0';
+	return dst;
 }
 
 #if __WINDOWS__
@@ -2389,8 +2455,8 @@ R_API int r_core_cmd_pipe(RCore *core, char *radare_cmd, char *shell_cmd) {
 		ret = 0;
 	}
 #if __UNIX__
-	radare_cmd = (char*)r_str_trim_head (radare_cmd);
-	shell_cmd = (char*)r_str_trim_head (shell_cmd);
+	r_str_trim_head (radare_cmd);
+	r_str_trim_head (shell_cmd);
 
 	r_sys_signal (SIGPIPE, SIG_IGN);
 	stdout_fd = dup (1);
@@ -2477,6 +2543,30 @@ static char *parse_tmp_evals(RCore *core, const char *str) {
 	return res;
 }
 
+static bool is_macro_command(const char *ptr) {
+	ptr = r_str_trim_head_ro (ptr);
+	while (IS_DIGIT (*ptr)) {
+		ptr++;
+	}
+	return *ptr == '(';
+}
+
+static char *find_ch_after_macro(char *ptr, char ch) {
+	int depth = 0;
+	while (*ptr) {
+		if (depth == 0 && *ptr == ch) {
+			return ptr;
+		}
+		if (*ptr == '(') {
+			depth++;
+		} else if (*ptr == ')') {
+			depth--;
+		}
+		ptr++;
+	}
+	return NULL;
+}
+
 static int r_core_cmd_subst(RCore *core, char *cmd) {
 	ut64 rep = strtoull (cmd, NULL, 10);
 	int ret = 0, orep;
@@ -2511,7 +2601,8 @@ static int r_core_cmd_subst(RCore *core, char *cmd) {
 	if (core->max_cmd_depth - core->cons->context->cmd_depth == 1) {
 		core->prompt_offset = core->offset;
 	}
-	cmd = r_str_trim_head_tail (icmd);
+	cmd = (char *)r_str_trim_head_ro (icmd);
+	r_str_trim_tail (cmd);
 	// lines starting with # are ignored (never reach cmd_hash()), except #! and #?
 	if (!*cmd) {
 		if (core->cmdrepeat > 0) {
@@ -2529,7 +2620,12 @@ static int r_core_cmd_subst(RCore *core, char *cmd) {
 	}
 	if (*cmd != '"') {
 		if (!strchr (cmd, '\'')) { // allow | awk '{foo;bar}' // ignore ; if there's a single quote
-			if ((colon = strchr (cmd, ';'))) {
+			if (is_macro_command (cmd)) {
+				colon = find_ch_after_macro (cmd, ';');
+			} else {
+				colon = strchr (cmd, ';');
+			}
+			if (colon) {
 				*colon = 0;
 			}
 		}
@@ -2658,11 +2754,14 @@ static bool set_tmp_arch(RCore *core, char *arch, char **tmparch) {
 	return true;
 }
 
-static bool set_tmp_bits(RCore *core, int bits, char **tmpbits) {
+static bool set_tmp_bits(RCore *core, int bits, char **tmpbits, int *cmd_ignbithints) {
 	r_return_val_if_fail (tmpbits, false);
 	*tmpbits = strdup (r_config_get (core->config, "asm.bits"));
 	r_config_set_i (core->config, "asm.bits", bits);
 	core->fixedbits = true;
+	// XXX: why?
+	*cmd_ignbithints = r_config_get_i (core->config, "anal.ignbithints");
+	r_config_set_i (core->config, "anal.ignbithints", 1);
 	return true;
 }
 
@@ -2691,7 +2790,7 @@ static int r_core_cmd_subst_i(RCore *core, char *cmd, char *colon, bool *tmpseek
 		r_list_free (tmpenvs);
 		return 0;
 	}
-	cmd = r_str_trim_head_tail (cmd);
+	r_str_trim (cmd);
 
 	char *$0 = strstr (cmd, "$(");
 	if ($0) {
@@ -2773,7 +2872,7 @@ static int r_core_cmd_subst_i(RCore *core, char *cmd, char *colon, bool *tmpseek
 					while (*str == '>') {
 						str++;
 					}
-					str = (char *)r_str_trim_ro (str);
+					str = (char *)r_str_trim_head_ro (str);
 					r_cons_flush ();
 					const bool append = p[2] == '>';
 					pipefd = r_cons_pipe_open (str, 1, append);
@@ -2848,7 +2947,11 @@ static int r_core_cmd_subst_i(RCore *core, char *cmd, char *colon, bool *tmpseek
 	// TODO: must honor " and ` boundaries
 	//ptr = strrchr (cmd, ';');
 	if (*cmd != '#') {
-		ptr = (char *)r_str_lastbut (cmd, ';', quotestr);
+		if (is_macro_command (cmd)) {
+			ptr = find_ch_after_macro (cmd, ';');
+		} else {
+			ptr = (char *)r_str_lastbut (cmd, ';', quotestr);
+		}
 		if (colon && ptr) {
 			int ret ;
 			*ptr = '\0';
@@ -2993,7 +3096,8 @@ escape_pipe:
 		int use_editor = false;
 		int ocolor = r_config_get_i (core->config, "scr.color");
 		*ptr = '\0';
-		str = r_str_trim_head_tail (ptr + 1 + (ptr[1] == '>'));
+		str = ptr + 1 + (ptr[1] == '>');
+		r_str_trim (str);
 		if (!*str) {
 			eprintf ("No output?\n");
 			goto next2;
@@ -3191,7 +3295,7 @@ escape_backtick:
 		ptr = NULL;
 	}
 
-	cmd_tmpseek = core->tmpseek = ptr ? true: false;
+	cmd_tmpseek = core->tmpseek = ptr != NULL;
 	int rc = 0;
 	if (ptr) {
 		char *f, *ptr2 = strchr (ptr + 1, '!');
@@ -3205,7 +3309,8 @@ escape_backtick:
 		char *tmpasm = NULL;
 		bool flgspc_changed = false;
 		int tmpfd = -1;
-		int sz, len;
+		size_t sz;
+		int len;
 		ut8 *buf;
 
 		*ptr++ = '\0';
@@ -3225,7 +3330,7 @@ repeat_arroba:
 			ptr--;
 		}
 
-		ptr = r_str_trim_tail (ptr);
+		r_str_trim_tail (ptr);
 
 		if (ptr[1] == '?') {
 			r_core_cmd_help (core, help_msg_at);
@@ -3287,7 +3392,7 @@ repeat_arroba:
 				f = r_file_slurp (ptr + 2, &sz);
 				if (f) {
 					{
-						RBuffer *b = r_buf_new_with_bytes ((const ut8*)f, sz);
+						RBuffer *b = r_buf_new_with_bytes ((const ut8*)f, (ut64)sz);
 						RIODesc *d = r_io_open_buffer (core->io, b, R_PERM_RWX, 0);
 						if (d) {
 							if (tmpdesc) {
@@ -3326,9 +3431,7 @@ repeat_arroba:
 				}
 				break;
 			case 'b': // "@b:" // bits
-				is_bits_set = set_tmp_bits (core, r_num_math (core->num, ptr + 2), &tmpbits);
-				cmd_ignbithints = r_config_get_i (core->config, "anal.ignbithints");
-				r_config_set_i (core->config, "anal.ignbithints", 1);
+				is_bits_set = set_tmp_bits (core, r_num_math (core->num, ptr + 2), &tmpbits, &cmd_ignbithints);
 				break;
 			case 'i': // "@i:"
 				{
@@ -3349,6 +3452,38 @@ repeat_arroba:
 						tmpeval = r_str_prepend (tmpeval, cmd);
 						free (cmd);
 					}
+				}
+				break;
+			case 'v': // "@v:" // value (honors asm.bits and cfg.bigendian)
+				if (ptr[1] == ':') {
+					ut8 buf[8] = {0};
+					ut64 v = r_num_math (core->num, ptr + 2);
+					int be = r_config_get_i (core->config, "cfg.bigendian");
+					int bi = r_config_get_i (core->config, "asm.bits");
+					if (bi == 64) {
+						r_write_ble64 (buf, v, be);
+						len = 8;
+					} else {
+						r_write_ble32 (buf, v, be);
+						len = 4;
+					}
+					r_core_block_size (core, R_ABS (len));
+					RBuffer *b = r_buf_new_with_bytes (buf, len);
+					RIODesc *d = r_io_open_buffer (core->io, b, R_PERM_RWX, 0);
+					if (d) {
+						if (tmpdesc) {
+							r_io_desc_close (tmpdesc);
+						}
+						tmpdesc = d;
+						if (pamode) {
+							r_config_set_i (core->config, "io.va", 1);
+						}
+						r_io_map_new (core->io, d->fd, d->perm, 0, core->offset, r_buf_size (b));
+						r_core_block_size (core, len);
+						r_core_block_read (core);
+					}
+				} else {
+					eprintf ("Invalid @v: syntax\n");
 				}
 				break;
 			case 'x': // "@x:" // hexpairs
@@ -3405,7 +3540,7 @@ repeat_arroba:
 					if (q) {
 						*q++ = 0;
 						int bits = r_num_math (core->num, q);
-						is_bits_set = set_tmp_bits (core, bits, &tmpbits);
+						is_bits_set = set_tmp_bits (core, bits, &tmpbits, &cmd_ignbithints);
 					}
 					is_arch_set = set_tmp_arch (core, ptr + 2, &tmpasm);
 				} else {
@@ -3416,7 +3551,7 @@ repeat_arroba:
 				{
 					len = strlen (ptr + 2);
 					r_core_block_size (core, len);
-					const ut8 *buf = (const ut8*)r_str_trim_ro (ptr + 2);
+					const ut8 *buf = (const ut8*)r_str_trim_head_ro (ptr + 2);
 
 					if (len > 0) {
 						RBuffer *b = r_buf_new_with_bytes (buf, len);
@@ -3456,7 +3591,7 @@ break;
 			goto next_arroba;
 		}
 ignore:
-		ptr = r_str_trim_head (ptr + 1) - 1;
+		r_str_trim_head (ptr + 1);
 		cmd = r_str_trim_nc (cmd);
 		if (ptr2) {
 			if (strlen (ptr + 1) == 13 && strlen (ptr2 + 1) == 6 &&
@@ -3475,7 +3610,8 @@ ignore:
 			}
 		}
 
-		offstr = r_str_trim_head (ptr + 1);
+		r_str_trim_head (ptr + 1);
+		offstr = ptr + 1;
 
 		addr = r_num_math (core->num, offstr);
 		addr_is_set = true;
@@ -3561,7 +3697,7 @@ next_arroba:
 				if (addr_is_set) {
 					core->offset = addr;
 				}
-				ret = r_cmd_call (core->rcmd, r_str_trim_head (cmd));
+				ret = r_cmd_call (core->rcmd, r_str_trim_head_ro (cmd));
 			} else {
 				if (addr_is_set) {
 					if (ptr[1]) {
@@ -3569,7 +3705,7 @@ next_arroba:
 						r_core_block_read (core);
 					}
 				}
-				ret = r_cmd_call (core->rcmd, r_str_trim_head (cmd));
+				ret = r_cmd_call (core->rcmd, r_str_trim_head_ro (cmd));
 
 			}
 			if (tmpseek) {
@@ -3621,8 +3757,16 @@ next_arroba:
 		goto beach;
 	}
 fuji:
-	rc = cmd? r_cmd_call (core->rcmd, r_str_trim_head (cmd)): false;
+	if (cmd) {
+		r_str_trim_head (cmd);
+		rc = r_cmd_call (core->rcmd, cmd);
+	} else {
+		rc = false;
+	}
 beach:
+	if (grep) {
+		grep = unescape_special_chars (grep, SPECIAL_CHARS_REGULAR);
+	}
 	r_cons_grep_process (grep);
 	if (scr_html != -1) {
 		r_cons_flush ();
@@ -3778,11 +3922,10 @@ R_API int r_core_cmd_foreach3(RCore *core, const char *cmd, char *each) { // "@@
 			r_list_free (list);
 		}
 		break;
-	case 'r':
-		// registers
+	case 'r': // @@@r
 		{
 			ut64 offorig = core->offset;
-			for (i = 0; i < 128; i++) {
+			for (i = 0; i < R_REG_TYPE_LAST; i++) {
 				RRegItem *item;
 				ut64 value;
 				head = r_reg_get_list (dbg->reg, i);
@@ -3791,6 +3934,9 @@ R_API int r_core_cmd_foreach3(RCore *core, const char *cmd, char *each) { // "@@
 				}
 				r_list_foreach (head, iter, item) {
 					if (item->size != core->anal->bits) {
+						continue;
+					}
+					if (item->type != i) {
 						continue;
 					}
 					value = r_reg_get_value (dbg->reg, item);
@@ -3803,7 +3949,6 @@ R_API int r_core_cmd_foreach3(RCore *core, const char *cmd, char *each) { // "@@
 		}
 		break;
 	case 'i': // @@@i
-		// imports
 		{
 			RBinImport *imp;
 			ut64 offorig = core->offset;
@@ -4002,24 +4147,6 @@ static void foreachOffset(RCore *core, const char *_cmd, const char *each) {
 		each = nextLine;
 	}
 	free (cmd);
-}
-
-struct duplicate_flag_t {
-	RList *ret;
-	const char *word;
-};
-
-static bool duplicate_flag(RFlagItem *flag, void *u) {
-	struct duplicate_flag_t *user = (struct duplicate_flag_t *)u;
-	/* filter per flag spaces */
-	if (r_str_glob (flag->name, user->word)) {
-		RFlagItem *cloned_item = r_flag_item_clone (flag);
-		if (!cloned_item) {
-			return false;
-		}
-		r_list_append (user->ret, cloned_item);
-	}
-	return true;
 }
 
 R_API int r_core_cmd_foreach(RCore *core, const char *cmd, char *each) {
@@ -4374,19 +4501,6 @@ out_finish:
 	return false;
 }
 
-R_API void run_pending_anal(RCore *core) {
-	if (core && core->ev) {
-		// allow incall events in the run_pending step
-		core->ev->incall = false;
-	}
-	if (core && core->anal && core->anal->cmdtail) {
-		char *res = r_strbuf_drain (core->anal->cmdtail);
-		core->anal->cmdtail = r_strbuf_new (NULL);
-		r_core_cmd_lines (core, res);
-		free (res);
-	}
-}
-
 static int run_cmd_depth(RCore *core, char *cmd);
 
 #if USE_TREESITTER
@@ -4395,10 +4509,13 @@ struct tsr2cmd_state {
 	TSParser *parser;
 	RCore *core;
 	char *input;
+	char *saved_input;
 	TSTree *tree;
+	TSTree *saved_tree;
 	bool log;
 	bool split_lines;
 	bool is_last_cmd;
+	TSNode substitute_cmd;
 };
 
 struct tsr2cmd_edit {
@@ -4431,6 +4548,15 @@ struct ts_data_symbol_map {
 static char *ts_node_sub_string(TSNode node, const char *cstr) {
 	ut32 start, end;
 	TS_START_END (node, start, end);
+	return r_str_newf ("%.*s", end - start, cstr + start);
+}
+
+static char *ts_node_sub_parent_string(TSNode parent, TSNode node, const char *cstr) {
+	ut32 start, end;
+	TS_START_END (node, start, end);
+	ut32 parent_start = ts_node_start_byte (parent);
+	start -= parent_start;
+	end -= parent_start;
 	return r_str_newf ("%.*s", end - start, cstr + start);
 }
 
@@ -4467,22 +4593,24 @@ DEFINE_IS_TS_FCN(double_quoted_arg)
 DEFINE_IS_TS_FCN(single_quoted_arg)
 DEFINE_IS_TS_FCN(concatenation)
 
-// NOTE: this should be in sync with SPECIAL_CHARACTERS in
-//       radare2-shell-parser grammar, except for ", ' and
-//       whitespaces, because we let cmd_substitution_arg create
-//       new arguments
-static const char *SPECIAL_CHARS_REGULAR = "@;~$#|`\"'()<>";
-static const char *SPECIAL_CHARS_DOUBLE_QUOTED = "\"";
-static const char *SPECIAL_CHARS_SINGLE_QUOTED = "'";
-
 static struct tsr2cmd_edit *create_cmd_edit(struct tsr2cmd_state *state, TSNode arg, char *new_text) {
 	struct tsr2cmd_edit *e = R_NEW0 (struct tsr2cmd_edit);
+	ut32 command_start = ts_node_start_byte (state->substitute_cmd);
+	TSPoint command_point = ts_node_start_point (state->substitute_cmd);
 	e->new_text = new_text;
-	e->old_text = ts_node_sub_string (arg, state->input);
-	e->start = ts_node_start_byte (arg);
-	e->end = ts_node_end_byte (arg);
+	e->old_text = ts_node_sub_parent_string (state->substitute_cmd, arg, state->input);
+	e->start = ts_node_start_byte (arg) - command_start;
+	e->end = ts_node_end_byte (arg) - command_start;
 	e->start_point = ts_node_start_point (arg);
 	e->end_point = ts_node_end_point (arg);
+	if (e->start_point.row == command_point.row) {
+		e->start_point.column -= command_point.column;
+	}
+	if (e->end_point.row == command_point.row) {
+		e->end_point.column -= command_point.column;
+	}
+	e->start_point.row -= command_point.row;
+	e->end_point.row -= command_point.row;
 	return e;
 }
 
@@ -4499,7 +4627,7 @@ static char *escape_special_chars(char *s, const char *special_chars) {
 	size_t s_len = strlen (s);
 	char *d = R_NEWS (char, s_len * 2 + 1);
 	int i, j = 0;
-	for (i = 0; i < s_len; ++i) {
+	for (i = 0; i < s_len; i++) {
 		if (strchr (special_chars, s[i])) {
 			d[j++] = '\\';
 		}
@@ -4508,22 +4636,6 @@ static char *escape_special_chars(char *s, const char *special_chars) {
 	d[j++] = '\0';
 	free (s);
 	return d;
-}
-
-static char *unescape_special_chars(char *s, const char *special_chars) {
-	char *dst = R_NEWS (char, strlen (s) + 1);
-	int i, j = 0;
-
-	for (i = 0; s[i]; i++) {
-		if (s[i] != '\\' || !strchr (special_chars, s[i + 1])) {
-			dst[j++] = s[i];
-			continue;
-		}
-		dst[j++] = s[i + 1];
-		i++;
-	}
-	dst[j++] = '\0';
-	return dst;
 }
 
 void free_tsr2cmd_edit(struct tsr2cmd_edit *edit) {
@@ -4538,7 +4650,7 @@ static void parsed_args_free(struct parsed_args *a) {
 	}
 
 	int i;
-	for (i = 0; i < a->argc; ++i) {
+	for (i = 0; i < a->argc; i++) {
 		free (a->argv[i]);
 	}
 	free (a->argv);
@@ -4546,32 +4658,40 @@ static void parsed_args_free(struct parsed_args *a) {
 	free (a);
 }
 
-static void do_handle_substitution_arg(struct tsr2cmd_state *state, TSNode arg, RList *edits) {
+static char *do_handle_substitution_cmd(struct tsr2cmd_state *state, TSNode inn_cmd) {
 	RCore *core = state->core;
-	TSNode inn_cmd = ts_node_child (arg, 1);
-	r_return_if_fail (!ts_node_is_null (inn_cmd));
-	char *inn_str = ts_node_sub_string (inn_cmd, state->input);
+	char *inn_str = ts_node_sub_parent_string (state->substitute_cmd, inn_cmd, state->input);
 
 	// save current color and disable it
 	int ocolor = r_config_get_i (core->config, "scr.color");
 	r_config_set_i (core->config, "scr.color", 0);
 	core->cmd_in_backticks = true;
+	int value = core->num->value;
 
 	// execute the sub command
 	char *o_out = r_core_cmd_str (core, inn_str);
 
 	// restore color and cmd_in_backticks
+	core->num->value = value;
 	core->cmd_in_backticks = false;
 	r_config_set_i (core->config, "scr.color", ocolor);
 	free (inn_str);
 
 	// replace the output of the sub command with the current argument
-	char *out = strdup (r_str_trim_head_tail (o_out));
+	char *out = strdup (o_out);
+	r_str_trim (out);
 	R_LOG_DEBUG ("output of inner command: '%s'\n", out);
 	free (o_out);
 
 	// replace newlines and similar with spaces
 	replace_whitespaces (out, ' ');
+	return out;
+}
+
+static void handle_cmd_substitution_arg(struct tsr2cmd_state *state, TSNode arg, RList *edits) {
+	TSNode inn_cmd = ts_node_child (arg, 1);
+	r_return_if_fail (!ts_node_is_null (inn_cmd));
+	char *out = do_handle_substitution_cmd (state, inn_cmd);
 	// escape special chars to prevent creation of new tokens when parsing again
 	const char *special_chars;
 	if (is_ts_double_quoted_arg (ts_node_parent (arg))) {
@@ -4588,12 +4708,12 @@ static void handle_substitution_args(struct tsr2cmd_state *state, TSNode args, R
 	if (is_ts_args (args) || is_ts_concatenation (args) || is_ts_double_quoted_arg (args)) {
 		uint32_t n_children = ts_node_named_child_count (args);
 		uint32_t i;
-		for (i = 0; i < n_children; ++i) {
+		for (i = 0; i < n_children; i++) {
 			TSNode arg = ts_node_named_child (args, i);
 			handle_substitution_args (state, arg, edits);
 		}
 	} else if (is_ts_cmd_substitution_arg (args)) {
-		do_handle_substitution_arg (state, args, edits);
+		handle_cmd_substitution_arg (state, args, edits);
 	} else if (is_ts_arg (args)) {
 		TSNode arg = ts_node_named_child (args, 0);
 		handle_substitution_args (state, arg, edits);
@@ -4619,7 +4739,7 @@ static char *do_handle_ts_unescape_arg(struct tsr2cmd_state *state, TSNode arg) 
 	} else if (is_ts_concatenation (arg)) {
 		uint32_t i, n_children = ts_node_named_child_count (arg);
 		RStrBuf *sb = r_strbuf_new (NULL);
-		for (i = 0; i < n_children; ++i) {
+		for (i = 0; i < n_children; i++) {
 			TSNode sub_arg = ts_node_named_child (arg, i);
 			char *s = do_handle_ts_unescape_arg (state, sub_arg);
 			r_strbuf_append (sb, s);
@@ -4633,7 +4753,7 @@ static char *do_handle_ts_unescape_arg(struct tsr2cmd_state *state, TSNode arg) 
 static char *create_argv_str(struct parsed_args *a) {
 	RStrBuf *sb = r_strbuf_new (NULL);
 	int i;
-	for (i = 0; i < a->argc; ++i) {
+	for (i = 0; i < a->argc; i++) {
 		if (i > 0) {
 			r_strbuf_append (sb, " ");
 		}
@@ -4651,14 +4771,15 @@ static struct parsed_args *handle_ts_unescape_arg(struct tsr2cmd_state *state, T
 	return a;
 }
 
-static struct parsed_args *handle_ts_unescape_args(struct tsr2cmd_state *state, TSNode args) {
+static struct parsed_args *parse_args(struct tsr2cmd_state *state, TSNode args) {
+	r_return_val_if_fail (!ts_node_is_null (args), NULL);
 	if (is_ts_args (args)) {
 		uint32_t n_children = ts_node_named_child_count (args);
 		uint32_t i;
 		struct parsed_args *a = R_NEW0 (struct parsed_args);
 		a->argc = n_children;
 		a->argv = R_NEWS (char *, a->argc);
-		for (i = 0; i < n_children; ++i) {
+		for (i = 0; i < n_children; i++) {
 			TSNode arg = ts_node_named_child (args, i);
 			a->argv[i] = do_handle_ts_unescape_arg (state, arg);
 		}
@@ -4670,117 +4791,87 @@ static struct parsed_args *handle_ts_unescape_args(struct tsr2cmd_state *state, 
 	return NULL;
 }
 
-static TSTree *apply_edits(struct tsr2cmd_state *state, RList *edits, TSNode old_args, TSNode *new_args) {
+static TSTree *apply_edits(struct tsr2cmd_state *state, RList *edits) {
 	struct tsr2cmd_edit *edit;
 	RListIter *it;
-	uint32_t min_start = UINT32_MAX;
-	uint32_t max_old_end = 0;
-	TSPoint *min_start_point = NULL, *max_old_end_point = NULL;
-	uint32_t diff_length = 0, new_length = 0;
 
 	R_LOG_DEBUG ("old input = '%s'\n", state->input);
 	r_list_foreach (edits, it, edit) {
-		diff_length += strlen (edit->new_text) - strlen (edit->old_text);
-		new_length += strlen (edit->new_text);
-		// FIXME: r_str_replace is not good, there may be other instances of the replaced string.
+		R_LOG_DEBUG ("apply_edits: about to replace '%s' with '%s'\n", edit->old_text, edit->new_text);
 		state->input = r_str_replace (state->input, edit->old_text, edit->new_text, 0);
-		if (edit->start < min_start) {
-			min_start = edit->start;
-			min_start_point = &edit->start_point;
-		}
-		if (edit->end > max_old_end) {
-			max_old_end = edit->end;
-			max_old_end_point = &edit->end_point;
-		}
 	}
 	R_LOG_DEBUG ("new input = '%s'\n", state->input);
-
-	uint32_t start_byte, end_byte;
-	TSTree *copy_tree = ts_tree_copy (state->tree);
-	if (!r_list_empty (edits)) {
-		// edit the tree and update it
-		TSInputEdit ie = {
-			.start_byte = min_start,
-			.old_end_byte = max_old_end,
-			.new_end_byte = max_old_end + diff_length,
-			.start_point = *min_start_point,
-			.old_end_point = *max_old_end_point,
-			.new_end_point = { .row = min_start_point->row, .column = min_start_point->column + new_length },
-		};
-		ts_tree_edit (copy_tree, &ie);
-
-		start_byte = ts_node_start_byte (old_args);
-		end_byte = ie.new_end_byte;
-	} else {
-		start_byte = ts_node_start_byte (old_args);
-		end_byte = ts_node_end_byte (old_args);
-	}
-
-	TSTree *new_tree = ts_parser_parse_string (state->parser, copy_tree, state->input, strlen (state->input));
-	ts_tree_delete (copy_tree);
-
-	TSNode new_root = ts_tree_root_node (new_tree);
-	if (ts_node_has_error (new_root)) {
-		R_LOG_ERROR ("Parsing error after applying command substitutions\n");
-		ts_tree_delete (new_tree);
-		return NULL;
-	}
-	TSNode node = ts_node_descendant_for_byte_range (new_root, start_byte, end_byte);
-
-	while (strcmp (ts_node_type (node), ts_node_type (old_args))) {
-		node = ts_node_parent (node);
-	}
-	*new_args = node;
-	return new_tree;
+	return ts_parser_parse_string (state->parser, NULL, state->input, strlen (state->input));
 }
 
-// it parses the args, whatever they are, and return a parsed_args struct that
-// represents the data
-static struct parsed_args *handle_args(struct tsr2cmd_state *state, TSNode args) {
-	char *orig_input = state->input;
-	struct parsed_args *res = NULL;
-	TSTree *new_tree = NULL;
-	state->input = strdup (state->input);
+static void substitute_args_fini(struct tsr2cmd_state *state) {
+	if (state->tree != state->saved_tree) {
+		ts_tree_delete (state->tree);
+	}
+	state->tree = state->saved_tree;
+	state->saved_tree = NULL;
+	if (state->input != state->saved_input) {
+		free (state->input);
+	}
+	state->input = state->saved_input;
+	state->saved_input = NULL;
+}
 
-	if (is_ts_args (args) || is_ts_arg (args)) {
-		RList *edits = r_list_newf ((RListFree)free_tsr2cmd_edit);
-		TSNode new_args;
+static void substitute_args_init(struct tsr2cmd_state *state, TSNode command) {
+	state->saved_input = state->input;
+	state->saved_tree = state->tree;
+	state->substitute_cmd = command;
+	state->input = ts_node_sub_string (state->substitute_cmd, state->input);
+	R_LOG_DEBUG ("Shrinking input to '%s'\n", state->input);
+}
 
-		handle_substitution_args (state, args, edits);
-		new_tree = apply_edits (state, edits, args, &new_args);
-		r_list_free (edits);
-		if (!new_tree) {
-			goto out;
-		}
-
-		res = handle_ts_unescape_args (state, new_args);
-
-		if (is_ts_arg (args) && res->argc > 1) {
-			R_LOG_ERROR ("Multiple arguments where only one was expected\n");
-			parsed_args_free (res);
-			res = NULL;
-			goto out;
-		}
-	} else {
-		res = handle_ts_unescape_args (state, args);
+static bool substitute_args_do(struct tsr2cmd_state *state, RList *edits, TSNode *new_command) {
+	TSTree *new_tree = apply_edits (state, edits);
+	if (!new_tree) {
+		return false;
 	}
 
-out:
-	ts_tree_delete (new_tree);
-	free (state->input);
-	state->input = orig_input;
-	R_LOG_DEBUG ("restore input: '%s'\n", state->input);
+	TSNode root = ts_tree_root_node (new_tree);
+	if (ts_node_has_error (root)) {
+		ts_tree_delete (new_tree);
+		return false;
+	}
+	*new_command = ts_node_named_child (root, 0);
+	state->tree = new_tree;
+	return true;
+}
+
+static bool substitute_args(struct tsr2cmd_state *state, TSNode args, TSNode *new_command) {
+	RList *edits = r_list_newf ((RListFree)free_tsr2cmd_edit);
+
+	if (is_ts_args (args) || is_ts_arg (args)) {
+		handle_substitution_args (state, args, edits);
+	}
+
+	bool res = substitute_args_do (state, edits, new_command);
+	r_list_free (edits);
 	return res;
 }
 
-static char *ts_node_handle_arg(struct tsr2cmd_state *state, TSNode arg) {
-	struct parsed_args *a = handle_args (state, arg);
-	if (a == NULL) {
-		R_LOG_ERROR( "Cannot parse arg\n");
+static char *ts_node_handle_arg(struct tsr2cmd_state *state, TSNode command, TSNode arg, uint32_t child_idx) {
+	TSNode new_command;
+	substitute_args_init (state, command);
+	bool ok = substitute_args (state, arg, &new_command);
+	if (!ok) {
+		R_LOG_ERROR ("Error while substituting arguments\n");
+		substitute_args_fini (state);
 		return NULL;
 	}
-	char *str = strdup(a->argv_str);
+
+	arg = ts_node_named_child (new_command, child_idx);
+	struct parsed_args *a = parse_args (state, arg);
+	if (a == NULL) {
+		R_LOG_ERROR ("Cannot parse arg\n");
+		return NULL;
+	}
+	char *str = strdup (a->argv_str);
 	parsed_args_free (a);
+	substitute_args_fini (state);
 	return str;
 }
 
@@ -4817,14 +4908,26 @@ DEFINE_HANDLE_TS_FCN(arged_command) {
 
 	struct parsed_args *pr_args = NULL;
 	if (!ts_node_is_null (args)) {
-		pr_args = handle_args (state, args);
+		TSNode new_command, new_args;
+		substitute_args_init (state, node);
+		bool ok = substitute_args (state, args, &new_command);
+		if (!ok) {
+			R_LOG_ERROR ("Error while substituting arguments\n");
+			substitute_args_fini (state);
+			res = false;
+			goto err;
+		}
+		new_args = ts_node_named_child (new_command, 1);
+		pr_args = parse_args (state, new_args);
 		if (!pr_args) {
 			res = false;
 			goto err;
 		}
 
+		substitute_args_fini (state);
+
 		int i;
-		for (i = 0; i < pr_args->argc; ++i) {
+		for (i = 0; i < pr_args->argc; i++) {
 			R_LOG_DEBUG ("parsed_arg %d: '%s'\n", i, pr_args->argv[i]);
 		}
 	}
@@ -4863,7 +4966,7 @@ DEFINE_HANDLE_TS_FCN(repeat_command) {
 	}
 
 	bool res = true;
-	for (int i = 0; i < rep; ++i) {
+	for (int i = 0; i < rep; i++) {
 		res &= handle_ts_command (state, command);
 	}
 	return res;
@@ -4912,6 +5015,7 @@ DEFINE_HANDLE_TS_FCN(redirect_command) {
 
 	if (arg_str[0] == '$') {
 		// redirect output of command to an alias variable
+		R_LOG_DEBUG ("redirect_command: alias = '%s'\n", arg_str);
 		TSNode command = ts_node_child_by_field_name (node, "command", strlen ("command"));
 		char *command_str = ts_node_sub_string (command, state->input);
 
@@ -4930,6 +5034,8 @@ DEFINE_HANDLE_TS_FCN(redirect_command) {
 		free (command_str);
 		res = true;
 	} else {
+		r_cons_flush ();
+		R_LOG_DEBUG ("redirect_command: fdn = %d, is_append = %d\n", fdn, is_append);
 		int pipefd = r_cons_pipe_open (arg_str, fdn, is_append);
 		if (pipefd != -1) {
 			if (!pipecolor) {
@@ -4966,6 +5072,18 @@ DEFINE_HANDLE_TS_FCN(help_command) {
 		r_core_cmd_help (state->core, help_msg_at_at_at);
 	} else if (!strcmp (node_string, "|?")) {
 		r_core_cmd_help (state->core, help_msg_vertical_bar);
+	} else if (!strcmp (node_string + strlen (node_string) - 2, "?*")) {
+		size_t node_len = strlen (node_string);
+		int detail = 0;
+		if (node_len > 3 && node_string[node_len - 3] == '?') {
+			detail++;
+			if (node_len > 4 && node_string[node_len - 4] == '?') {
+				detail++;
+			}
+		}
+		node_string[node_len - 2 - detail] = '\0';
+		recursive_help (state->core, detail, node_string);
+		return true;
 	} else {
 		return r_cmd_call (state->core->rcmd, node_string) != -1;
 	}
@@ -4976,7 +5094,7 @@ DEFINE_HANDLE_TS_FCN(tmp_seek_command) {
 	// TODO: handle offsets like "+30", "-13", etc.
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode offset = ts_node_named_child (node, 1);
-	char *offset_string = ts_node_handle_arg (state, offset);
+	char *offset_string = ts_node_handle_arg (state, node, offset, 1);
 	ut64 orig_offset = state->core->offset;
 	R_LOG_DEBUG ("tmp_seek_command, changing offset to %s\n", offset_string);
 	r_core_seek (state->core, r_num_math (state->core->num, offset_string), 1);
@@ -4989,7 +5107,7 @@ DEFINE_HANDLE_TS_FCN(tmp_seek_command) {
 DEFINE_HANDLE_TS_FCN(tmp_blksz_command) {
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode blksz = ts_node_named_child (node, 1);
-	char *blksz_string = ts_node_handle_arg (state, blksz);
+	char *blksz_string = ts_node_handle_arg (state, node, blksz, 1);
 	ut64 orig_blksz = state->core->blocksize;
 	R_LOG_DEBUG ("tmp_blksz_command, changing blksz to %s\n", blksz_string);
 	r_core_block_size (state->core, r_num_math (state->core->num, blksz_string));
@@ -5004,8 +5122,8 @@ DEFINE_HANDLE_TS_FCN(tmp_fromto_command) {
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode from = ts_node_named_child (node, 1);
 	TSNode to = ts_node_named_child (node, 2);
-	char *from_str = ts_node_handle_arg (state, from);
-	char *to_str = ts_node_handle_arg (state, to);
+	char *from_str = ts_node_handle_arg (state, node, from, 1);
+	char *to_str = ts_node_handle_arg (state, node, to, 2);
 	R_LOG_DEBUG ("tmp_fromto_command, changing fromto to (%s, %s)\n", from_str, to_str);
 
 	const char *fromvars[] = { "anal.from", "diff.from", "graph.from",
@@ -5040,17 +5158,18 @@ DEFINE_HANDLE_TS_FCN(tmp_arch_command) {
 	RCore *core = state->core;
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 	char *tmparch, *tmpbits;
 	bool is_arch_set = false, is_bits_set = false;
 	bool oldfixedarch = core->fixedarch, oldfixedbits = core->fixedbits;
+	int cmd_ignbithints = -1;
 
 	// change arch and bits
 	char *q = strchr (arg_str, ':');
 	if (q) {
 		*q++ = '\0';
 		int bits = r_num_math (core->num, q);
-		is_bits_set = set_tmp_bits (core, bits, &tmpbits);
+		is_bits_set = set_tmp_bits (core, bits, &tmpbits, &cmd_ignbithints);
 	}
 	is_arch_set = set_tmp_arch (core, arg_str, &tmparch);
 
@@ -5061,11 +5180,15 @@ DEFINE_HANDLE_TS_FCN(tmp_arch_command) {
 	if (is_arch_set) {
 		core->fixedarch = oldfixedarch;
 		r_config_set (core->config, "asm.arch", tmparch);
-		R_FREE (tmparch);
+		free (tmparch);
 	}
 	if (is_bits_set) {
 		r_config_set (core->config, "asm.bits", tmpbits);
 		core->fixedbits = oldfixedbits;
+		free (tmpbits);
+	}
+	if (cmd_ignbithints != -1) {
+		r_config_set_i (core->config, "anal.ignbithints", cmd_ignbithints);
 	}
 	free (arg_str);
 	return res;
@@ -5075,18 +5198,21 @@ DEFINE_HANDLE_TS_FCN(tmp_bits_command) {
 	RCore *core = state->core;
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 	bool oldfixedbits = core->fixedbits;
 	char *tmpbits;
+	int cmd_ignbithints;
 
 	int bits = r_num_math (core->num, arg_str);
-	set_tmp_bits (core, bits, &tmpbits);
+	set_tmp_bits (core, bits, &tmpbits, &cmd_ignbithints);
 
 	bool res = handle_ts_command (state, command);
 
 	r_config_set (core->config, "asm.bits", tmpbits);
 	core->fixedbits = oldfixedbits;
+	r_config_set_i (core->config, "anal.ignbithints", cmd_ignbithints);
 
+	free (tmpbits);
 	free (arg_str);
 	return res;
 }
@@ -5095,7 +5221,7 @@ DEFINE_HANDLE_TS_FCN(tmp_nthi_command) {
 	RCore *core = state->core;
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 
 	ut64 orig_offset = state->core->offset;
 	int index = r_num_math (core->num, arg_str);
@@ -5132,7 +5258,7 @@ DEFINE_HANDLE_TS_FCN(tmp_eval_command) {
 
 	RConfigHold *hc = r_config_hold_new (core->config);
 	uint32_t i, n_args = ts_node_named_child_count (args);
-	for (i = 0; i < n_args; ++i) {
+	for (i = 0; i < n_args; i++) {
 		TSNode arg = ts_node_named_child (args, i);
 		char *arg_str = ts_node_sub_string (arg, state->input);
 		char *eq = strchr (arg_str, '=');
@@ -5157,7 +5283,7 @@ DEFINE_HANDLE_TS_FCN(tmp_fs_command) {
 	RCore *core = state->core;
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 	r_flag_space_push (core->flags, arg_str);
 	bool res = handle_ts_command (state, command);
 	r_flag_space_pop (core->flags);
@@ -5169,7 +5295,7 @@ DEFINE_HANDLE_TS_FCN(tmp_reli_command) {
 	RCore *core = state->core;
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 	ut64 orig_offset = state->core->offset;
 	ut64 addr = r_num_math (core->num, arg_str);
 	if (addr) {
@@ -5185,7 +5311,7 @@ DEFINE_HANDLE_TS_FCN(tmp_kuery_command) {
 	RCore *core = state->core;
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 	ut64 orig_offset = state->core->offset;
 	char *out = sdb_querys (core->sdb, NULL, 0, arg_str);
 	if (out) {
@@ -5202,7 +5328,7 @@ DEFINE_HANDLE_TS_FCN(tmp_fd_command) {
 	RCore *core = state->core;
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 	int tmpfd = core->io->desc ? core->io->desc->fd : -1;
 	r_io_use_fd (core->io, atoi (arg_str));
 	bool res = handle_ts_command (state, command);
@@ -5215,7 +5341,7 @@ DEFINE_HANDLE_TS_FCN(tmp_reg_command) {
 	RCore *core = state->core;
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 	ut64 orig_offset = state->core->offset;
 	// TODO: add support for operations (e.g. @r:PC+10)
 	ut64 regval = r_debug_reg_get (core->dbg, arg_str);
@@ -5260,8 +5386,8 @@ out_buf:
 DEFINE_HANDLE_TS_FCN(tmp_file_command) {
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
-	int sz;
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
+	size_t sz;
 	bool res = false;
 
 	char *f = r_file_slurp (arg_str, &sz);
@@ -5270,7 +5396,7 @@ DEFINE_HANDLE_TS_FCN(tmp_file_command) {
 		goto out;
 	}
 
-	res = handle_tmp_desc (state, command, (ut8 *)f, sz);
+	res = handle_tmp_desc (state, command, (ut8 *)f, (int)sz);
 
 	free (f);
 out:
@@ -5281,7 +5407,7 @@ out:
 DEFINE_HANDLE_TS_FCN(tmp_string_command) {
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 	int sz;
 	bool res = false;
 
@@ -5297,7 +5423,7 @@ DEFINE_HANDLE_TS_FCN(tmp_string_command) {
 DEFINE_HANDLE_TS_FCN(tmp_hex_command) {
 	TSNode command = ts_node_named_child (node, 0);
 	TSNode arg = ts_node_named_child (node, 1);
-	char *arg_str = ts_node_handle_arg (state, arg);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
 	int sz;
 	bool res = false;
 
@@ -5309,6 +5435,451 @@ DEFINE_HANDLE_TS_FCN(tmp_hex_command) {
 
 	free (buf);
 	free (arg_str);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_flags_command) {
+	RCore *core = state->core;
+	TSNode command = ts_node_named_child (node, 0);
+	TSNode arg = ts_node_named_child (node, 1);
+	char *arg_str = ts_node_handle_arg(state, node, arg, 1);
+	const RSpace *flagspace = r_flag_space_cur (core->flags);
+	RFlagItem *flag;
+	RListIter *iter;
+	bool ret = true;
+	RList *match_flag_items = r_list_newf ((RListFree)r_flag_item_free);
+	if (!match_flag_items) {
+		return true;
+	}
+
+	/* duplicate flags that match word, to be sure the command is going to
+	   be executed on flags values at the moment the command is called
+	   (without side effects) */
+	struct duplicate_flag_t u = {
+		.ret = match_flag_items,
+		.word = arg_str,
+	};
+	r_flag_foreach_space (core->flags, flagspace, duplicate_flag, &u);
+
+	/* for all flags that match */
+	r_list_foreach (match_flag_items, iter, flag) {
+		if (r_cons_is_breaked ()) {
+			break;
+		}
+
+		char *buf = NULL;
+		const char *tmp = NULL;
+		R_LOG_DEBUG ("iter_flags_command: seek to %" PFMT64x "\n", flag->offset);
+		r_core_seek (core, flag->offset, 1);
+		r_cons_push ();
+		ret &= handle_ts_command(state, command);
+		tmp = r_cons_get_buffer ();
+		buf = tmp? strdup (tmp): NULL;
+		r_cons_pop ();
+		r_cons_strcat (buf);
+		free (buf);
+		r_core_task_yield (&core->tasks);
+	}
+
+	r_list_free (match_flag_items);
+	free (arg_str);
+	return ret;
+}
+
+enum dbt_commands_mode {
+	DBT_COMMANDS_MODE_ADDR,
+	DBT_COMMANDS_MODE_BP,
+	DBT_COMMANDS_MODE_SP,
+};
+
+static bool iter_dbt_commands(struct tsr2cmd_state *state, TSNode node, enum dbt_commands_mode mode) {
+	RCore *core = state->core;
+	TSNode command = ts_node_named_child (node, 0);
+	RList *list = r_debug_frames (core->dbg, UT64_MAX);
+	ut64 orig_offset = core->offset;
+	RDebugFrame *frame;
+	RListIter *iter;
+	bool res = true;
+
+	r_list_foreach (list, iter, frame) {
+		switch (mode) {
+		case DBT_COMMANDS_MODE_ADDR:
+			r_core_seek (core, frame->addr, 1);
+			break;
+		case DBT_COMMANDS_MODE_SP:
+			r_core_seek (core, frame->sp, 1);
+			break;
+		case DBT_COMMANDS_MODE_BP:
+			r_core_seek (core, frame->bp, 1);
+			break;
+		default:
+			r_warn_if_reached ();
+			return false;
+		}
+		res &= handle_ts_command (state, command);
+		r_cons_newline ();
+	}
+	r_core_seek (core, orig_offset, 1);
+	r_list_free (list);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_dbta_command) {
+	return iter_dbt_commands (state, node, DBT_COMMANDS_MODE_ADDR);
+}
+
+DEFINE_HANDLE_TS_FCN(iter_dbtb_command) {
+	return iter_dbt_commands (state, node, DBT_COMMANDS_MODE_BP);
+}
+
+DEFINE_HANDLE_TS_FCN(iter_dbts_command) {
+	return iter_dbt_commands (state, node, DBT_COMMANDS_MODE_SP);
+}
+
+DEFINE_HANDLE_TS_FCN(iter_file_lines_command) {
+	// TODO: old implementation has some unknown check on '('
+	RCore *core = state->core;
+	bool res = true;
+	TSNode command = ts_node_named_child (node, 0);
+	TSNode arg = ts_node_named_child (node, 1);
+	char *arg_str = ts_node_handle_arg(state, node, arg, 1);
+	ut64 orig_offset = core->offset;
+	FILE *fd = r_sandbox_fopen (arg_str, "r");
+	if (!fd) {
+		res = false;
+		goto arg_out;
+	}
+
+	core->rcmd->macro.counter = 0;
+	while (!feof (fd)) {
+		char buf[1024];
+		buf[0] = '\0';
+		if (!fgets (buf, sizeof (buf), fd)) {
+			break;
+		}
+		ut64 addr = r_num_math (core->num, buf);
+		r_core_seek (core, addr, 1);
+		res &= handle_ts_command (state, command);
+		core->rcmd->macro.counter++;
+	}
+	r_core_seek (core, orig_offset, 1);
+	fclose (fd);
+
+arg_out:
+	free (arg_str);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_offsets_command) {
+	RCore *core = state->core;
+	bool res = true;
+	TSNode command = ts_node_named_child (node, 0);
+	if (ts_node_named_child_count (node) < 2) {
+		// no offsets provided, all's good.
+		return true;
+	}
+
+	TSNode args = ts_node_named_child (node, 1);
+	ut64 orig_offset = core->offset;
+
+	TSNode new_command;
+	substitute_args_init (state, node);
+	bool ok = substitute_args (state, args, &new_command);
+	if (!ok) {
+		R_LOG_ERROR ("Error while substituting arguments\n");
+		substitute_args_fini (state);
+		return false;
+	}
+	args = ts_node_named_child (new_command, 1);
+	if (ts_node_is_null (args)) {
+		// after replacing cmd substitution, no args are provided.
+		substitute_args_fini (state);
+		return true;
+	}
+
+	struct parsed_args *a = parse_args (state, args);
+	if (a == NULL) {
+		R_LOG_ERROR ("Cannot parse args\n");
+		return false;
+	}
+	substitute_args_fini (state);
+
+	int i;
+	for (i = 0; i < a->argc; i++) {
+		ut64 addr = r_num_math (core->num, a->argv[i]);
+		R_LOG_DEBUG ("iter_offsets_command: seek to %" PFMT64x "\n", addr);
+		r_core_seek (core, addr, 1);
+		res &= handle_ts_command (state, command);
+		r_cons_flush ();
+	}
+
+	r_core_seek (core, orig_offset, 1);
+	parsed_args_free (a);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_sdbquery_command) {
+	RCore *core = state->core;
+	TSNode command = ts_node_named_child (node, 0);
+	TSNode arg = ts_node_named_child (node, 1);
+	char *arg_str = ts_node_handle_arg (state, node, arg, 1);
+	ut64 orig_offset = core->offset;
+
+	char *out = sdb_querys (core->sdb, NULL, 0, arg_str);
+	if (!out) {
+		return false;
+	}
+	char *str, *each = out;
+	ut64 addr;
+	bool res = true;
+	do {
+		while (*each == ' ') {
+			each++;
+		}
+		if (!*each) {
+			break;
+		}
+		str = strchr (each, ' ');
+		if (str) {
+			*str = '\0';
+			addr = r_num_math (core->num, each);
+			*str = ' ';
+		} else {
+			addr = r_num_math (core->num, each);
+		}
+		each = str + 1;
+		r_core_seek (core, addr, 1);
+		res &= handle_ts_command (state, command);
+		r_cons_flush ();
+	} while (str != NULL);
+	r_core_seek (core, orig_offset, 1);
+	free (out);
+	free (arg_str);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_threads_command) {
+	RCore *core = state->core;
+	TSNode command = ts_node_named_child (node, 0);
+	int pid = core->dbg->pid;
+	if (!core->dbg->h || !core->dbg->h->pids) {
+		return false;
+	}
+
+	bool res = true;
+	RList *list = core->dbg->h->pids (core->dbg, R_MAX (0, pid));
+	RListIter *iter;
+	RDebugPid *p;
+	r_list_foreach (list, iter, p) {
+		r_cons_printf ("# PID %d\n", p->pid);
+		r_debug_select (core->dbg, p->pid, p->pid);
+		res &= handle_ts_command (state, command);
+		r_cons_newline ();
+	}
+	r_list_free (list);
+	r_debug_select (core->dbg, pid, pid);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_bbs_command) {
+	RCore *core = state->core;
+	TSNode command = ts_node_named_child (node, 0);
+	RListIter *iter;
+	RAnalBlock *bb;
+	int bs = core->blocksize;
+	ut64 orig_offset = core->offset;
+	bool res = true;
+	RAnalFunction *fcn = r_anal_get_function_at (core->anal, core->offset);
+	if (!fcn) {
+		eprintf ("No function at current address\n");
+		return false;
+	}
+	r_list_sort (fcn->bbs, bb_cmp);
+	r_list_foreach (fcn->bbs, iter, bb) {
+		r_core_block_size (core, bb->size);
+		r_core_seek (core, bb->addr, 1);
+		res &= handle_ts_command (state, command);
+		if (r_cons_is_breaked ()) {
+			break;
+		}
+	}
+	r_core_block_size (core, bs);
+	r_core_seek (core, orig_offset, 1);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_instrs_command) {
+	TSNode command = ts_node_named_child (node, 0);
+	RCore *core = state->core;
+	RListIter *iter;
+	RAnalBlock *bb;
+	int i;
+	bool res = true;
+	ut64 orig_offset = core->offset;
+	int bs = core->blocksize;
+	RAnalFunction *fcn = r_anal_get_function_at (core->anal, core->offset);
+	if (!fcn) {
+		eprintf ("No function at current address\n");
+		return false;
+	}
+	r_list_sort (fcn->bbs, bb_cmp);
+	r_list_foreach (fcn->bbs, iter, bb) {
+		for (i = 0; i < bb->ninstr; i++) {
+			ut64 addr = bb->addr + r_anal_bb_offset_inst (bb, i);
+			int sz = r_anal_bb_size_i (bb, i);
+			r_core_block_size (core, sz);
+			r_core_seek (core, addr, 1);
+			res &= handle_ts_command (state, command);
+			if (r_cons_is_breaked ()) {
+				break;
+			}
+		}
+	}
+
+	r_core_block_size (core, bs);
+	r_core_seek (core, orig_offset, 1);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_functions_command) {
+	TSNode command = ts_node_named_child (node, 0);
+	TSNode arg = ts_node_named_child (node, 1);
+	char *arg_str = NULL;
+	RCore *core = state->core;
+	bool res = true;
+	ut64 orig_offset = core->offset;
+	int bs = core->blocksize;
+	RAnalFunction *fcn;
+	RListIter *iter;
+
+	if (!ts_node_is_null (arg)) {
+		arg_str = ts_node_handle_arg (state, node, arg, 1);
+	}
+
+	r_list_foreach (core->anal->fcns, iter, fcn) {
+		if (arg_str && !strstr (fcn->name, arg_str)) {
+			continue;
+		}
+		char *buf;
+		r_core_block_size (core, r_anal_function_linear_size (fcn));
+		r_core_seek (core, fcn->addr, 1);
+		r_cons_push ();
+		res &= handle_ts_command (state, command);
+		buf = (char *)r_cons_get_buffer ();
+		if (buf) {
+			buf = strdup (buf);
+		}
+		r_cons_pop ();
+		r_cons_strcat (buf);
+		free (buf);
+		if (r_cons_is_breaked ()) {
+			break;
+		}
+	}
+
+	r_core_block_size (core, bs);
+	r_core_seek (core, orig_offset, 1);
+	free (arg_str);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_step_command) {
+	TSNode command = ts_node_named_child (node, 0);
+	TSNode from_n = ts_node_named_child (node, 1);
+	TSNode to_n = ts_node_named_child (node, 2);
+	TSNode step_n = ts_node_named_child (node, 3);
+	RCore *core = state->core;
+	bool res = true;
+	ut64 orig_offset = core->offset;
+	int bs = core->blocksize;
+
+	char *from_str = ts_node_handle_arg (state, node, from_n, 1);
+	char *to_str = ts_node_handle_arg (state, node, to_n, 2);
+	char *step_str = ts_node_handle_arg (state, node, step_n, 3);
+	ut64 from = r_num_math (core->num, from_str);
+	ut64 to = r_num_math (core->num, to_str);
+	ut64 step = r_num_math (core->num, step_str);
+	free (from_str);
+	free (to_str);
+	free (step_str);
+
+	ut64 cur;
+	for (cur = from; cur < to; cur += step) {
+		r_core_seek (core, cur, 1);
+		r_core_block_size (core, step);
+		res &= handle_ts_command (state, command);
+		if (r_cons_is_breaked ()) {
+			break;
+		}
+	}
+
+	r_core_block_size (core, bs);
+	r_core_seek (core, orig_offset, 1);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_interpret_command) {
+	RCore *core = state->core;
+	TSNode command = ts_node_named_child (node, 0);
+	TSNode in_cmd = ts_node_named_child (node, 1);
+	substitute_args_init (state, node);
+
+	RList *edits = r_list_newf ((RListFree)free_tsr2cmd_edit);
+
+	char *in_cmd_out = do_handle_substitution_cmd (state, in_cmd);
+	in_cmd_out = escape_special_chars (in_cmd_out, SPECIAL_CHARS_REGULAR);
+	struct tsr2cmd_edit *e = create_cmd_edit (state, in_cmd, in_cmd_out);
+	r_list_append (edits, e);
+
+	TSNode op = ts_node_child (node, 1);
+	e = create_cmd_edit (state, op, strdup ("@@="));
+	r_list_append (edits, e);
+
+	TSNode new_command;
+	bool ok = substitute_args_do (state, edits, &new_command);
+	if (!ok) {
+		r_list_free (edits);
+		substitute_args_fini (state);
+		return false;
+	}
+	TSNode args = ts_node_named_child (new_command, 1);
+
+	struct parsed_args *a = parse_args (state, args);
+	if (!a) {
+		r_list_free (edits);
+		substitute_args_fini (state);
+		return false;
+	}
+
+	r_list_free (edits);
+	substitute_args_fini (state);
+
+	int i;
+	ut64 orig_offset = core->offset;
+	bool res = true;
+	for (i = 0; i < a->argc; i++) {
+		ut64 addr = r_num_math (core->num, a->argv[i]);
+		R_LOG_DEBUG ("iter_interpret_command: seek to %" PFMT64x "\n", addr);
+		r_core_seek (core, addr, 1);
+		res &= handle_ts_command (state, command);
+		r_cons_flush ();
+	}
+
+	r_core_seek (core, orig_offset, 1);
+	parsed_args_free (a);
+	return res;
+}
+
+DEFINE_HANDLE_TS_FCN(iter_hit_command) {
+	RCore *core = state->core;
+	TSNode command = ts_node_named_child (node, 0);
+	TSNode search_cmd = ts_node_named_child (node, 1);
+	char *command_str = ts_node_sub_string (command, state->input);
+	char *cmdhit = strdup (r_config_get (core->config, "cmd.hit"));
+	r_config_set (core->config, "cmd.hit", command_str);
+	bool res = handle_ts_command (state, search_cmd);
+	r_config_set (core->config, "cmd.hit", cmdhit);
+	free (command_str);
 	return res;
 }
 
@@ -5338,6 +5909,7 @@ DEFINE_HANDLE_TS_FCN(grep_command) {
 	r_strbuf_prepend (sb, "~");
 	char *specifier_str = r_cons_grep_strip (r_strbuf_get (sb), "`");
 	r_strbuf_free (sb);
+	specifier_str = unescape_special_chars (specifier_str, SPECIAL_CHARS_REGULAR);
 	R_LOG_DEBUG ("grep_command processed specifier: '%s'\n", specifier_str);
 	r_cons_grep_process (specifier_str);
 	free (arg_str);
@@ -5400,6 +5972,12 @@ DEFINE_HANDLE_TS_FCN(scr_tts_command) {
 	return res;
 }
 
+DEFINE_HANDLE_TS_FCN(number_command) {
+	ut64 addr = r_num_math (state->core->num, node_string);
+	r_core_seek (state->core, addr, 1);
+	return true;
+}
+
 static bool handle_ts_command(struct tsr2cmd_state *state, TSNode node) {
 	bool ret = false;
 	RCmd *cmd = state->core->rcmd;
@@ -5417,8 +5995,6 @@ static bool handle_ts_command(struct tsr2cmd_state *state, TSNode node) {
 		free (state->core->lastcmd);
 		state->core->lastcmd = ts_node_sub_string (node, state->input);
 	}
-	/* run pending analysis commands */
-	run_pending_anal (state->core);
 	return ret;
 }
 
@@ -5441,7 +6017,7 @@ DEFINE_HANDLE_TS_FCN(commands) {
 	if (state->split_lines) {
 		r_cons_break_push (NULL, NULL);
 	}
-	for (i = 0; i < child_count; ++i) {
+	for (i = 0; i < child_count; i++) {
 		if (state->split_lines && r_cons_is_breaked ()) {
 			r_cons_break_pop ();
 			return false;
@@ -5449,7 +6025,9 @@ DEFINE_HANDLE_TS_FCN(commands) {
 		TSNode command = ts_node_named_child (node, i);
 		res &= handle_ts_command (state, command);
 		if (!res) {
-			eprintf ("Error while parsing command: %s\n", state->input);
+			char *command_str = ts_node_sub_string (command, state->input);
+			eprintf ("Error while executing command: %s\n", command_str);
+			free (command_str);
 			return false;
 		}
 		if (state->split_lines) {
@@ -5502,7 +6080,7 @@ static void ts_symbols_init(RCmd *cmd) {
 }
 
 static bool core_cmd_tsr2cmd(RCore *core, const char *cstr, bool split_lines, bool log) {
-	char *input = strdup (cstr);
+	char *input = strdup (r_str_trim_head_ro (cstr));
 
 	ts_symbols_init (core->rcmd);
 
@@ -5546,7 +6124,6 @@ static int run_cmd_depth(RCore *core, char *cmd) {
 
 	if (core->cons->context->cmd_depth < 1) {
 		eprintf ("r_core_cmd: That was too deep (%s)...\n", cmd);
-		run_pending_anal (core);
 		return false;
 	}
 	core->cons->context->cmd_depth--;
@@ -5565,8 +6142,6 @@ static int run_cmd_depth(RCore *core, char *cmd) {
 		}
 		rcmd = ptr + 1;
 	}
-	/* run pending analysis commands */
-	run_pending_anal (core);
 	core->cons->context->cmd_depth++;
 	return ret;
 }
@@ -5639,10 +6214,7 @@ R_API int r_core_cmd(RCore *core, const char *cstr, int log) {
 
 	ret = run_cmd_depth (core, cmd);
 	free (cmd);
-	return ret;
 beach:
-	/* run pending analysis commands */
-	run_pending_anal (core);
 	return ret;
 }
 

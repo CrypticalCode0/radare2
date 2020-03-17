@@ -626,14 +626,32 @@ R_API void r_meta_print(RAnal *a, RAnalMetaItem *d, int rad, PJ *pj, bool show_f
 			pj_kn (pj, "offset", d->from);
 			pj_ks (pj, "type", r_meta_type_to_string (d->type));
 
-			pj_k (pj, "name");
-			if (d->type == 's' && (base64_str = r_base64_encode_dyn (d->str, -1))) {
-				pj_s (pj, base64_str);
-				free (base64_str);
+			if (d->type == 'H') {
+				pj_k (pj, "color");
+				ut8 r = 0, g = 0, b = 0, A = 0;
+				const char *esc = strchr (d->str, '\x1b');
+				if (esc) {
+					r_cons_rgb_parse (esc, &r, &g, &b, &A);
+					char *rgb_str = r_cons_rgb_tostring (r, g, b);
+					base64_str = r_base64_encode_dyn (rgb_str, -1);
+					if (d->type == 's' && base64_str) {
+						pj_s (pj, base64_str);
+						free (base64_str);
+					} else {
+						pj_s (pj, rgb_str);
+					}
+					free (rgb_str);
+				} else {
+					pj_s (pj, str);
+				}
 			} else {
-				pj_s (pj, str);
+				pj_k (pj, "name");
+				if (d->type == 's' && (base64_str = r_base64_encode_dyn (d->str, -1))) {
+					pj_s (pj, base64_str);
+				} else {
+					pj_s (pj, str);
+				}
 			}
-
 			if (d->type == 'd') {
 				pj_kn (pj, "size", d->size);
 			} else if (d->type == 's') {
@@ -767,7 +785,7 @@ R_API void r_meta_print(RAnal *a, RAnalMetaItem *d, int rad, PJ *pj, bool show_f
 				break;
 			case 'H':
 				{
-					ut8 r, g, b, A;
+					ut8 r = 0, g = 0, b = 0, A = 0;
 					const char *esc = strchr (d->str, '\x1b');
 					r_cons_rgb_parse (esc, &r, &g, &b, &A);
 					a->cb_printf ("%s rgb:%02x%02x%02x @ 0x%08"PFMT64x"\n",
@@ -1011,4 +1029,12 @@ R_API int r_meta_space_count_for(RAnal *a, const RSpace *space) {
 	myMetaUser mu = { .ctx = space };
 	r_meta_list_cb (a, R_META_TYPE_ANY, 0, meta_count_cb, &mu, UT64_MAX);
 	return mu.count;
+}
+
+R_API void r_meta_set_data_at(RAnal *a, ut64 addr, ut64 wordsz) {
+	char val[0x10];
+	if (snprintf (val, sizeof (val), "%"PFMT64u, wordsz) < 1) {
+		return;
+	}
+	r_meta_add (a, R_META_TYPE_DATA, addr, addr + wordsz, val);
 }

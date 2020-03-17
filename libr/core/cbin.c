@@ -230,10 +230,6 @@ R_API int r_core_bin_set_cur(RCore *core, RBinFile *binfile) {
 	return true;
 }
 
-R_API int r_core_bin_refresh_strings(RCore *r) {
-	return r_bin_reset_strings (r->bin)? true: false;
-}
-
 static void _print_strings(RCore *r, RList *list, int mode, int va) {
 	bool b64str = r_config_get_i (r->config, "bin.b64str");
 	int minstr = r_config_get_i (r->config, "bin.minstr");
@@ -2504,6 +2500,59 @@ struct io_bin_section_info_t {
 	int fd;
 };
 
+/* Map Sections to Segments https://github.com/radareorg/radare2/issues/14647 */
+static int bin_map_sections_to_segments (RBin *bin, int mode) {
+	RListIter *iter, *iter2;
+	RBinSection *section = NULL, *segment = NULL;
+	RList *sections = r_list_new ();
+	RList *segments = r_list_new ();
+	RList *tmp = r_bin_get_sections (bin);
+	char *json_output = r_str_new ("");
+	RTable *table = r_table_new ();
+	RTableColumnType *typeString = r_table_type ("string");
+
+	r_table_add_column (table, typeString, "Segment", 0);
+	r_table_add_column (table, typeString, "Section", 0);
+
+	r_list_foreach (tmp, iter, section) {
+		RList *list = section->is_segment? segments: sections;
+		r_list_append (list, section);
+	}
+
+	r_list_foreach (segments, iter, segment) {
+		RInterval segment_itv = (RInterval){segment->vaddr, segment->size};
+		char *tmp2 = r_str_new ("");
+		r_list_foreach (sections, iter2, section) {
+			RInterval section_itv = (RInterval){section->vaddr, section->size};
+			if (r_itv_begin (section_itv) >= r_itv_begin (segment_itv) && r_itv_end (section_itv) <= r_itv_end (segment_itv) && section->name[0]) {
+				tmp2 = r_str_appendf (tmp2, "%s ", section->name);
+			}
+		}
+		r_table_add_row (table, segment->name, tmp2, 0);
+		/*output to json*/
+		json_output = r_str_appendf (json_output, "\"%s\": \"%s\",", segment->name, tmp2);
+		free (tmp2);
+	}
+	// remove last ,
+	json_output [strlen (json_output) - 1] = 0;
+	char *jo = r_str_newf ("[{%s}]", json_output);
+	free (json_output);
+	json_output = jo;
+
+	if (IS_MODE_JSON (mode)){
+		r_cons_printf ("%s", json_output);
+	} else if (IS_MODE_NORMAL (mode)){
+		r_cons_printf ("Section to Segment mapping:\n");
+		char *s = r_table_tostring (table);
+		r_cons_printf ("%s\n", s);
+		free (s);
+	}
+	free (json_output);
+	r_list_free (segments);
+	r_table_free (table);
+	return true;
+}
+
 static int bin_sections(RCore *r, int mode, ut64 laddr, int va, ut64 at, const char *name, const char *chksum, bool print_segments) {
 	char *str = NULL;
 	RBinSection *section;
@@ -2539,6 +2588,7 @@ static int bin_sections(RCore *r, int mode, ut64 laddr, int va, ut64 at, const c
 		int cols = r_cons_get_size (NULL);
 		RList *list = r_list_newf ((RListFree) r_listinfo_free);
 		if (!list) {
+			free (hashtypes);
 			return false;
 		}
 		RBinSection *s;
@@ -3915,6 +3965,9 @@ R_API int r_core_bin_info(RCore *core, int action, int mode, int va, RCoreBinFil
 	}
 	if ((action & R_CORE_BIN_ACC_SEGMENTS)) {
 		ret &= bin_sections (core, mode, loadaddr, va, at, name, chksum, true);
+	}
+	if ((action & R_CORE_BIN_ACC_SECTIONS_MAPPING)) {
+		ret &= bin_map_sections_to_segments (core->bin, mode);
 	}
 	if (r_config_get_i (core->config, "bin.relocs")) {
 		if ((action & R_CORE_BIN_ACC_RELOCS)) {

@@ -1,4 +1,4 @@
-NAME='Import project'
+NAME=Import project
 FILE=malloc://512
 CMDS=<<EOF
 e dir.projects = ../bins/other/projects
@@ -10,7 +10,7 @@ CCu base64:U29tZSB0ZXN0 @ 0x00404890
 EOF
 RUN
 
-NAME='Import project with overwriting'
+NAME=Import project with overwriting
 FILE=malloc://512
 CMDS=<<EOF
 e asm.bits=64
@@ -26,7 +26,7 @@ CCu base64:U29tZSB0ZXN0 @ 0x00404890
 EOF
 RUN
 
-NAME='Import project with overwriting'
+NAME=Import project with overwriting
 FILE=malloc://512
 CMDS=<<EOF
 t-*
@@ -49,7 +49,7 @@ afF @ 0x00000000
 EOF
 RUN
 
-NAME='Export project'
+NAME=Export project
 FILE=malloc://512
 CMDS=<<EOF
 e dir.projects = .tmp/
@@ -64,7 +64,7 @@ CCu base64:IlNvbWUgb3RoZXIgdGVzdCI= @ 0x00404890
 EOF
 RUN
 
-NAME='Set, export, unset and import'
+NAME=Set, export, unset and import
 FILE=malloc://512
 CMDS=<<EOF
 e dir.projects = .tmp/
@@ -84,7 +84,7 @@ CCu base64:IkZpcnN0IGNvbW1lbnQi @ 0x00404890
 EOF
 RUN
 
-NAME='xrefs'
+NAME=xrefs
 FILE=malloc://512
 CMDS=<<EOF
 ax 1
@@ -99,7 +99,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Import mapped project'
+NAME=Import mapped project
 FILE=malloc://512
 CMDS=<<EOF
 e dir.projects = ../bins/other/projects/
@@ -111,7 +111,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='asm.emu in project'
+NAME=asm.emu in project
 FILE=../bins/elf/analysis/simpleARM.elf
 CMDS=<<EOF
 e asm.flags = false
@@ -129,7 +129,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Variables in project file'
+NAME=Variables in project file
 FILE=../bins/efi/bootia32.efi
 CMDS=<<EOF
 e dir.projects = .tmp/
@@ -148,7 +148,7 @@ EOF
 RUN
 
 
-NAME='Types and link in project file'
+NAME=Types and link in project file
 FILE=-
 CMDS=<<EOF
 e dir.projects = .tmp/
@@ -164,7 +164,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Breakpoints in project file'
+NAME=Breakpoints in project file
 FILE=../bins/elf/analysis/main
 BROKEN=1
 CMDS=<<EOF
@@ -179,7 +179,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Visual Marks in project file'
+NAME=Visual Marks in project file
 FILE=../bins/elf/analysis/main
 CMDS=<<EOF
 fV 49 0x400410
@@ -194,7 +194,7 @@ fV 50 0x400412
 EOF
 RUN
 
-NAME='Custom types in project file'
+NAME=Custom types in project file
 BROKEN=1
 FILE=../bins/elf/analysis/main
 CMDS=<<EOF
@@ -216,7 +216,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Export custom types and import again'
+NAME=Export custom types and import again
 FILE=../bins/elf/analysis/main
 BROKEN=1
 CMDS=<<EOF
@@ -242,13 +242,13 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Save project for a binary and checking opened files'
-FILE='../bins/elf/analysis/main'
+NAME=Save project for a binary and checking opened files
+FILE=../bins/elf/analysis/main
 BROKEN=1
 CMDS=<<EOF
 e dir.projects = .tmp/
-Ps blah > /dev/null
-Po blah > /dev/null
+Ps ulumulu > /dev/null
+Po ulumulu > /dev/null
 o*~?
 EOF
 EXPECT=<<EOF
@@ -257,42 +257,41 @@ EOF
 RUN
 
 
-NAME='Save project for a binary without saving its info'
-FILE='../bins/elf/analysis/main'
-ARGS='-n'
+NAME=Save project for a binary without saving its info
+FILE=../bins/elf/analysis/main
+ARGS=-n
 CMDS=<<EOF
 e dir.projects = .tmp/
-Ps blah > /dev/null
-Po blah > /dev/null
+Ps blub > /dev/null
+Po blub > /dev/null
 i~format
 EOF
 EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Save project for a binary after analysis'
-FILE='../bins/elf/analysis/main'
-ARGS=''
+NAME=Save project for a binary after analysis
+FILE=../bins/elf/analysis/main
 CMDS=<<EOF
 e dir.projects = .tmp/
 aaa
-Ps blah
+Ps beer
   # Following command hangs:
-  # Po blah
+  # Po beer
 y
 EOF
 EXPECT=<<EOF
+beer
 EOF
 RUN
 
-NAME='Save project for a binary without saving its info at a specific map offset'
-FILE='../bins/elf/analysis/main'
-BROKEN=1
-ARGS='-n -m 0x1337'
+NAME=Save project for a binary without saving its info at a specific map offset
+FILE=../bins/elf/analysis/main
+ARGS=-n -m 0x1337
 CMDS=<<EOF
 e dir.projects = .tmp/
-Ps blah > /dev/null
-Po blah > /dev/null
+Ps hand > /dev/null
+Po hand > /dev/null
 om*~?
 om*~[2]
 EOF
@@ -302,71 +301,72 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Delete a saved project (with Pd)'
-FILE='../bins/elf/analysis/main'
-ARGS='-n'
+NAME=Delete a saved project (with Pd)
+FILE=../bins/elf/analysis/main
+ARGS=-n
 CMDS=<<EOF
 e dir.projects = .tmp/
-Ps blah > /dev/null
-Pd blah > /dev/null
-Pl~blah
+Ps cannot > /dev/null
+Pd cannot > /dev/null
+Pl~cannot
 
 EOF
 EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Delete a saved project (with P-)'
-FILE='../bins/elf/analysis/main'
-ARGS='-n'
+NAME=Delete a saved project (with P-)
+FILE=../bins/elf/analysis/main
+ARGS=-n
 CMDS=<<EOF
 e dir.projects = .tmp/
-Ps blah > /dev/null
-P- blah > /dev/null
-Pl~blah
+Ps erase > /dev/null
+P- erase > /dev/null
+Pl~erase
 EOF
 EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Delete a saved project and used directory (with Pd)'
-FILE='../bins/elf/analysis/main'
-ARGS='-n'
+NAME=Delete a saved project and used directory (with Pd)
+FILE=../bins/elf/analysis/main
+ARGS=-n
 CMDS=<<EOF
 e dir.projects = .tmp/
-Ps blah > /dev/null
-Pd blah > /dev/null
+Ps anesthetize > /dev/null
+Pd anesthetize > /dev/null
 Pl~blah
-ls -l `e dir.projects`~blah
+ls -l `e dir.projects`~anesthetize
 EOF
 EXPECT=<<EOF
 EOF
 RUN
 
 
-NAME='Delete a saved project and used directory (with P-)'
-FILE='../bins/elf/analysis/main'
-ARGS='-n'
-CMDS=<<EOF
-e dir.projects = .tmp/
-Ps blah > /dev/null
-P- blah > /dev/null
-Pl~blah
-ls -l `e dir.projects`~blah
-EOF
-EXPECT=<<EOF
-EOF
-RUN
-
-NAME='Save project for a file with asm.bits=32 and check the value after loading again'
-FILE='../bins/src/hello.c'
+NAME=Delete a saved project and used directory (with P-)
+FILE=../bins/elf/analysis/main
 BROKEN=1
-ARGS=''
+ARGS=-n
+CMDS=<<EOF
+e dir.projects = .tmp/
+Ps lightbulb > /dev/null
+P- lightbulb > /dev/null
+Pl~lightbulb
+ls -l `e dir.projects`~lightbulb
+EOF
+EXPECT=<<EOF
+-drwxr-xr-x  1  501:20    96          .tmp/lightbulb/
+EOF
+RUN
+
+NAME=Save project for a file with asm.bits=32 and check the value after loading again
+FILE=../bins/src/hello.c
+ARGS=
 CMDS=<<EOF
 e dir.projects = .tmp/
 e asm.bits=16
-Ps blah > /dev/null
-Po blah > /dev/null
+Ps sun > /dev/null
+Po sun > /dev/null
 e asm.bits
 EOF
 EXPECT=<<EOF
@@ -374,7 +374,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='prj.name saved in project'
+NAME=prj.name saved in project
 FILE=malloc://512
 CMDS=<<EOF
 e dir.projects = .tmp/
@@ -389,23 +389,22 @@ named_prj
 EOF
 RUN
 
-NAME='Checking e prj.name after saving again'
-BROKEN=1
-FILE='../bins/elf/analysis/main'
+NAME=Checking e prj.name after saving again
+FILE=../bins/elf/analysis/main
 CMDS=<<EOF
 e dir.projects = .tmp/
-Ps blah > /dev/null
-Po blah > /dev/null
-Ps blah > /dev/null
-Po blah > /dev/null
+Ps stupid > /dev/null
+Po stupid > /dev/null
+Ps stupid > /dev/null
+Po stupid > /dev/null
 e prj.name
 EOF
 EXPECT=<<EOF
-blah
+stupid
 EOF
 RUN
 
-NAME='Restoring xrefs'
+NAME=Restoring xrefs
 FILE=malloc://512
 CMDS=<<EOF
 e asm.arch = x86
@@ -414,8 +413,8 @@ e asm.bits=32
 e dir.projects = .tmp/
 wx 5031c0e801000000c3b801000000c3
 af
-Ps blah > /dev/null
-Po blah > /dev/null
+Ps dream > /dev/null
+Po dream > /dev/null
 axq
 EOF
 EXPECT=<<EOF
@@ -423,7 +422,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='Reopening projects bin info loading'
+NAME=Reopening projects bin info loading
 FILE=../bins/elf/analysis/main
 BROKEN=1
 CMDS=<<EOF

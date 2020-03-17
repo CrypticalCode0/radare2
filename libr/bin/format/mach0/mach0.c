@@ -1941,8 +1941,10 @@ struct MACH0_(obj_t) *MACH0_(mach0_new)(const char *file, struct MACH0_(opts_t) 
 		bin->header_at = options->header_at;
 	}
 	bin->file = file;
-	ut8 *buf;
-	if (!(buf = (ut8*)r_file_slurp (file, &bin->size))) {
+	size_t binsz;
+	ut8 *buf = (ut8 *)r_file_slurp (file, &binsz);
+	bin->size = binsz;
+	if (!buf) {
 		return MACH0_(mach0_free)(bin);
 	}
 	bin->b = r_buf_new ();
@@ -3292,7 +3294,7 @@ ut64 MACH0_(get_baddr)(struct MACH0_(obj_t) *bin) {
 	if (bin->hdr.filetype != MH_EXECUTE && bin->hdr.filetype != MH_DYLINKER) {
 		return 0;
 	}
-	for (i = 0; i < bin->nsegs; ++i) {
+	for (i = 0; i < bin->nsegs; i++) {
 		if (bin->segs[i].fileoff == 0 && bin->segs[i].filesize != 0) {
 			return bin->segs[i].vmaddr;
 		}

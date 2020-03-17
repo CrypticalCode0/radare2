@@ -129,7 +129,7 @@ static void rtr_textlog_chat (RCore *core, TextLog T) {
 		ret = rtrcmd (T, "Tl");
 		lastmsg = atoi (ret)-1;
 		free (ret);
-		if (r_cons_fgets (buf, sizeof (buf) - 1, 0, NULL) < 0) {
+		if (r_cons_fgets (buf, sizeof (buf), 0, NULL) < 0) {
 			goto beach;
 		}
 		if (!*buf) {
@@ -558,7 +558,7 @@ static int r_core_rtr_gdb_run(RCore *core, int launch, const char *path) {
 		debug_msg = true;
 		path++;
 	}
-	if (!(path = r_str_trim_ro (path)) || !*path) {
+	if (!(path = r_str_trim_head_ro (path)) || !*path) {
 		eprintf ("gdbserver: Port not specified\n");
 		return -1;
 	}
@@ -571,14 +571,14 @@ static int r_core_rtr_gdb_run(RCore *core, int launch, const char *path) {
 		eprintf ("gdbserver: File not specified\n");
 		return -1;
 	}
-	if (!(file = (char *)r_str_trim_ro (file)) || !*file) {
+	if (!(file = (char *)r_str_trim_head_ro (file)) || !*file) {
 		eprintf ("gdbserver: File not specified\n");
 		return -1;
 	}
 	args = strchr (file, ' ');
 	if (args) {
 		*args++ = '\0';
-		if (!(args = (char *)r_str_trim_ro (args))) {
+		if (!(args = (char *)r_str_trim_head_ro (args))) {
 			args = "";
 		}
 	} else {
@@ -708,7 +708,7 @@ R_API void r_core_rtr_list(RCore *core) {
 		case RTR_PROTOCOL_RAP: proto = "r2p"; break;
 		case RTR_PROTOCOL_UNIX: proto = "unix"; break;
 		}
-		r_cons_printf ("%d fd:%i %s://%s:%i/%s\n", 
+		r_cons_printf ("%d fd:%i %s://%s:%i/%s\n",
 			i, rtr_host[i].fd->fd, proto, rtr_host[i].host,
 			rtr_host[i].port, rtr_host[i].file);
 	}
@@ -724,7 +724,7 @@ R_API void r_core_rtr_add(RCore *core, const char *_input) {
 	input[sizeof (input) - 4] = '\0';
 
 	int proto = RTR_PROTOCOL_RAP;
-	char *host = (char *)r_str_trim_ro (input);
+	char *host = (char *)r_str_trim_head_ro (input);
 	char *pikaboo = strstr (host, "://");
 	if (pikaboo) {
 		struct {
@@ -762,9 +762,9 @@ R_API void r_core_rtr_add(RCore *core, const char *_input) {
 		port = NULL;
 	}
 	file = strchr (ptr, '/');
-	if (file) {	
+	if (file) {
 		*file = 0;
-		file = (char *)r_str_trim_ro (file + 1);
+		file = (char *)r_str_trim_head_ro (file + 1);
 	} else {
 		if (*host == ':' || strstr (host, "://:")) { // listen
 			// it's fine to listen without serving a file
@@ -990,7 +990,7 @@ R_API void r_core_rtr_cmd(RCore *core, const char *input) {
 	if (!fd && *input != '0') {
 		fd = -1;
 	}
-	const char *cmd = strchr (r_str_trim_ro (input), ' ');
+	const char *cmd = strchr (r_str_trim_head_ro (input), ' ');
 	if (cmd) {
 		cmd ++;
 		cmd_len = strlen (cmd);
@@ -1097,7 +1097,7 @@ R_API void r_core_rtr_cmd(RCore *core, const char *input) {
 	}
 
 	core->num->value = 0; // that's fine
-	cmd = r_str_trim_ro (cmd);
+	cmd = r_str_trim_head_ro (cmd);
 	RSocket *fh = rtr_host[rtr_n].fd;
 	if (!strlen (cmd)) {
 		// just check if we can connect

@@ -193,6 +193,7 @@ static const char *help_msg_question_v[] = {
 	"$Cn", "", "get nth call of function",
 	"$Dn", "", "get nth data reference in function",
 	"$D", "", "current debug map base address ?v $D @ rsp",
+	"$DB", "", "same as dbg.baddr, progam base address",
 	"$DD", "", "current debug map size",
 	"$e", "", "1 if end of block, else 0",
 	"$j", "", "jump address (e.g. jmp 0x10, jz 0x10 => 0x10)",
@@ -511,7 +512,7 @@ static int cmd_help(void *data, const char *input) {
 		}
 		break;
 	case 'B': // "?B"
-		k = r_str_trim_ro (input + 1);
+		k = r_str_trim_head_ro (input + 1);
 		tmp = r_core_get_boundaries_prot (core, -1, k, "search");
 		if (!tmp) {
 			return false;
@@ -610,7 +611,7 @@ static int cmd_help(void *data, const char *input) {
 					pj_ks (pj, "octal", sdb_fmt ("0%"PFMT64o, n));
 					pj_ks (pj, "unit", unit);
 					pj_ks (pj, "segment", sdb_fmt ("%04x:%04x", s, a));
-					
+
 				} else {
 					if (n >> 32) {
 						r_cons_printf ("int64   %"PFMT64d"\n", (st64)n);
@@ -623,7 +624,7 @@ static int cmd_help(void *data, const char *input) {
 					r_cons_printf ("octal   0%"PFMT64o"\n", n);
 					r_cons_printf ("unit    %s\n", unit);
 					r_cons_printf ("segment %04x:%04x\n", s, a);
-					
+
 					if (asnum) {
 						r_cons_printf ("string  \"%s\"\n", asnum);
 						free (asnum);
@@ -928,7 +929,7 @@ static int cmd_help(void *data, const char *input) {
 		}
 		break;
 	case 'E': // "?E" clippy echo
-		r_core_clippy (core, r_str_trim_ro (input + 1));
+		r_core_clippy (core, r_str_trim_head_ro (input + 1));
 		break;
 	case 'e': // "?e" echo
 		switch (input[1]) {
@@ -939,7 +940,7 @@ static int cmd_help(void *data, const char *input) {
 			break;
 		}
 		case 'b': { // "?eb"
-			char *arg = strdup (r_str_trim_ro (input + 2));
+			char *arg = strdup (r_str_trim_head_ro (input + 2));
 			int n = r_str_split (arg, ' ');
 			ut64 *portions = calloc (n, sizeof (ut64));
 			for (i = 0; i < n; i++) {
@@ -969,7 +970,7 @@ static int cmd_help(void *data, const char *input) {
 			}
 			break;
 		case 'n': { // "?en" echo -n
-			const char *msg = r_str_trim_ro (input + 2);
+			const char *msg = r_str_trim_head_ro (input + 2);
 			// TODO: replace all ${flagname} by its value in hexa
 			char *newmsg = filterFlags (core, msg);
 			r_str_unescape (newmsg);
@@ -1028,7 +1029,7 @@ static int cmd_help(void *data, const char *input) {
 			  }
 			break;
 		case ' ': {
-			const char *msg = r_str_trim_ro (input+1);
+			const char *msg = r_str_trim_head_ro (input+1);
 			// TODO: replace all ${flagname} by its value in hexa
 			char *newmsg = filterFlags (core, msg);
 			r_str_unescape (newmsg);
@@ -1142,7 +1143,7 @@ static int cmd_help(void *data, const char *input) {
 				// TODO: r_cons_input()
 				snprintf (foo, sizeof (foo) - 1, "%s: ", input);
 				r_line_set_prompt (foo);
-				r_cons_fgets (foo, sizeof (foo)-1, 0, NULL);
+				r_cons_fgets (foo, sizeof (foo), 0, NULL);
 				foo[sizeof (foo) - 1] = 0;
 				r_core_yank_set_str (core, R_CORE_FOREIGN_ADDR, foo, strlen (foo) + 1);
 				core->num->value = r_num_math (core->num, foo);

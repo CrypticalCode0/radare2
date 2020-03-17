@@ -126,10 +126,8 @@ R_API RAnal *r_anal_new(void) {
 			r_anal_add (anal, anal_static_plugins[i]);
 		}
 	}
-	anal->cmdtail = r_strbuf_new (NULL);
 	return anal;
 }
-
 
 R_API void r_anal_plugin_free (RAnalPlugin *p) {
 	if (p && p->fini) {
@@ -170,7 +168,6 @@ R_API RAnal *r_anal_free(RAnal *a) {
 		a->esil = NULL;
 	}
 	free (a->last_disasm_reg);
-	r_strbuf_free (a->cmdtail);
 	r_str_constpool_fini (&a->constpool);
 	free (a);
 	return NULL;
@@ -557,7 +554,7 @@ R_API bool r_anal_noreturn_add(RAnal *anal, const char *name, ut64 addr) {
 
 R_API bool r_anal_noreturn_drop(RAnal *anal, const char *expr) {
 	Sdb *TDB = anal->sdb_types;
-	expr = r_str_trim_ro (expr);
+	expr = r_str_trim_head_ro (expr);
 	const char *fcnname = NULL;
 	if (!strncmp (expr, "0x", 2)) {
 		ut64 n = r_num_math (NULL, expr);

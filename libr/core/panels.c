@@ -1730,7 +1730,7 @@ void __handleComment(RCore *core) {
 	r_line_set_prompt ("[Comment]> ");
 	strcpy (buf, "\"CC ");
 	i = strlen (buf);
-	if (r_cons_fgets (buf + i, sizeof (buf) - i - 1, 0, NULL) > 0) {
+	if (r_cons_fgets (buf + i, sizeof (buf) - i, 0, NULL) > 0) {
 		ut64 addr, orig;
 		addr = orig = core->offset;
 		if (core->print->cur_enabled) {
@@ -1757,7 +1757,7 @@ void __handleComment(RCore *core) {
 		if (buf[3] == ' ') {
 			int j, len = strlen (buf);
 			char *duped = strdup (buf);
-			for (i = 4, j = 4; i < len; ++i,++j) {
+			for (i = 4, j = 4; i < len; i++, j++) {
 				char c = duped[i];
 				if (c == '"' && i != (len - 1)) {
 					buf[j++] = '\\';

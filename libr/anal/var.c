@@ -190,6 +190,7 @@ R_API int r_anal_var_retype(RAnal *a, ut64 addr, int scope, int delta, char kind
 		return false;
 	}
 	if ((size == -1) && (delta == -1)) {
+		// TODO: use hashtable here
 		RList *list = r_anal_var_list (a, fcn, kind);
 		RListIter *iter;
 		RAnalVar *var;
@@ -814,7 +815,7 @@ R_API void r_anal_extract_rarg(RAnal *anal, RAnalOp *op, RAnalFunction *fcn, int
 					vname = r_type_func_args_name (TDB, fname, i);
 				}
 				if (!vname) {
-					name = r_str_newf ("%s%d", "arg", i + 1);
+					name = r_str_newf ("arg%d", i + 1);
 					vname = name;
 				}
 				r_anal_var_add (anal, fcn->addr, 1, delta, R_ANAL_VAR_KIND_REG, type,
@@ -954,7 +955,8 @@ static RList *var_generate_list(RAnal *a, RAnalFunction *fcn, int kind, bool dyn
 						int i;
 						int arg_max = fcn->cc ? r_anal_cc_max_arg (a, fcn->cc) : 0;
 						for (i = 0; i < arg_max; i++) {
-							if (!strcmp (reg->name, r_anal_cc_arg (a, fcn->cc, i))) {
+							const char *reg_arg = r_anal_cc_arg (a, fcn->cc, i);
+							if (reg_arg && !strcmp (reg->name, reg_arg)) {
 								if (delta != reg->index) {
 									delta = reg->index;
 								}

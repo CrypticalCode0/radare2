@@ -359,7 +359,7 @@ static void cmd_write_op (RCore *core, const char *input) {
 			const char *algo = NULL;
 			const char *key = NULL;
 			const char *iv = NULL;
-			char *space, *args = strdup (r_str_trim_ro (input+2));
+			char *space, *args = strdup (r_str_trim_head_ro (input+2));
 			space = strchr (args, ' ');
 			if (space) {
 				*space++ = 0;
@@ -403,9 +403,10 @@ static void cmd_write_op (RCore *core, const char *input) {
 	case 'p': // debrujin patterns
 		switch (input[2]) {
 		case 'D': // "wopD"
-			len = (int)(input[3]==' ')
-				? r_num_math (core->num, input + 3)
-				: core->blocksize;
+			{
+				char *sp = strchr (input, ' ');
+				len = sp?  r_num_math (core->num, sp + 1): core->blocksize;
+			}
 			if (len > 0) {
 				/* XXX This seems to fail at generating long patterns (wopD 512K) */
 				buf = (ut8*)r_debruijn_pattern (len, 0, NULL); //debruijn_charset);
@@ -420,20 +421,9 @@ static void cmd_write_op (RCore *core, const char *input) {
 						}
 						r_cons_newline ();
 					} else {
-						while (true) {
-							int res = r_core_write_at (core, addr, ptr, len);
-							if (res != 0) {
-								cmd_write_fail (core);
-							}
-							if (res < 1 || len == res) {
-								break;
-							}
-							if (res < len) {
-								ptr += res;
-								len -= res;
-								addr += res;
-							}
-						} 
+						if (!r_core_write_at (core, addr, ptr, len)) {
+							cmd_write_fail (core);
+						}
 					}
 					free (buf);
 				} else {
@@ -537,7 +527,7 @@ static void cmd_write_value (RCore *core, const char *input) {
 
 static bool cmd_wff(RCore *core, const char *input) {
 	ut8 *buf;
-	int size;
+	size_t size;
 	// XXX: file names cannot contain spaces
 	const char *arg = input + ((input[1] == ' ') ? 2 : 1);
 	int wseek = r_config_get_i (core->config, "cfg.wseek");
@@ -563,8 +553,8 @@ static bool cmd_wff(RCore *core, const char *input) {
 	}
 	if ((buf = (ut8*) r_file_slurp (a, &size))) {
 		int u_offset = 0;
-		int u_size = r_num_math (core->num, p);
-		if (u_size < 1) u_size = size;
+		ut64 u_size = r_num_math (core->num, p);
+		if (u_size < 1) u_size = (ut64)size;
 		if (p) {
 			*p++ = 0;
 			u_offset = r_num_math (core->num, p);
@@ -575,7 +565,7 @@ static bool cmd_wff(RCore *core, const char *input) {
 			}
 		}
 		r_io_use_fd (core->io, core->file->fd);
-		if (!r_io_write_at (core->io, core->offset, buf + u_offset, u_size)) {
+		if (!r_io_write_at (core->io, core->offset, buf + u_offset, (int)u_size)) {
 			eprintf ("r_io_write_at failed at 0x%08"PFMT64x"\n", core->offset);
 		}
 		WSEEK (core, size);
@@ -1303,7 +1293,7 @@ static int cmd_write(void *data, const char *input) {
 						r_core_cmd_help (core, help_msg_wt);
 						return 0;
 					}
-					const char *prefix = r_str_trim_ro (str + 2);
+					const char *prefix = r_str_trim_head_ro (str + 2);
 					if (!*prefix) {
 						prefix = "dump";
 					}
@@ -1315,7 +1305,7 @@ static int cmd_write(void *data, const char *input) {
 							r_core_cmd_help (core, help_msg_wt);
 							return 0;
 						}
-						filename = r_str_trim_ro (str);
+						filename = r_str_trim_head_ro (str);
 					} else {
 						filename = "";
 					}
@@ -1494,7 +1484,7 @@ static int cmd_write(void *data, const char *input) {
 		case ' ':
 		case 'i':
 		case '*': {
-			const char *file = r_str_trim_ro (input + 2);
+			const char *file = r_str_trim_head_ro (input + 2);
 			RAsmCode *acode;
 			r_asm_set_pc (core->assembler, core->offset);
 			acode = r_asm_massemble (core->assembler, file);

@@ -91,7 +91,7 @@ R_API RList *r_w32_dbg_maps(RDebug *);
 /* begin of debugger code */
 #if DEBUGGER
 
-#if !__WINDOWS__ || (!__APPLE__ && defined(WAIT_ON_ALL_CHILDREN))
+#if !__WINDOWS__ && !(__linux__ && !defined(WAIT_ON_ALL_CHILDREN))
 static int r_debug_handle_signals(RDebug *dbg) {
 #if __KFBSD__
 	return bsd_handle_signals (dbg);
@@ -755,7 +755,7 @@ static int r_debug_native_reg_write (RDebug *dbg, int type, const ut8* buf, int 
 			(void*)(size_t)buf, sizeof (R_DEBUG_REG_T));
 		if (sizeof (R_DEBUG_REG_T) < size)
 			size = sizeof (R_DEBUG_REG_T);
-		return (ret != 0) ? false: true;
+		return ret == 0;
 #else
 		return bsd_reg_write (dbg, type, buf, size);
 #endif

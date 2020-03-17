@@ -115,9 +115,7 @@ RUN
 
 NAME=t
 FILE=-
-CMDS=<<EOF
-t~char,double,float,int,long,short,size,uid,void # basic universal types
-EOF
+CMDS=t~char,double,float,int,long,short,size,uid,void # basic universal types
 EXPECT=<<EOF
 char
 char *
@@ -473,9 +471,7 @@ RUN
 
 NAME=tk - crash
 FILE=-
-CMDS=<<EOF
-tk -!!!! d'B%CCCC!9!!!!_
-EOF
+CMDS=tk -!!!! d'B%CCCC!9!!!!_
 EXPECT=<<EOF
 0x0
 EOF
@@ -1476,9 +1472,38 @@ afs
 afs
 EOF
 EXPECT=<<EOF
-fcn.004e2420 (int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4, int64_t arg5, int64_t arg6, int64_t arg_8h);
+void fcn.004e2420 (int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4, int64_t arg5, int64_t arg6, int64_t arg_8h);
 int32_t no_type (int32_t a, char **b);
 char type (int32_t a, char **b);
+EOF
+RUN
+
+NAME=afs fcnname with dots
+FILE=../bins/elf/hello_world
+CMDS=<<EOF
+af
+afs
+"afs foo.bar();"
+afs
+"afs char foo.bar(int a, ...);"
+afs
+EOF
+EXPECT=<<EOF
+void entry0 (int64_t arg3);
+int32_t foo.bar ();
+char foo.bar (int32_t a);
+EOF
+RUN
+
+NAME=afs sym.imp.*
+FILE=../bins/elf/hello_world
+CMDS=<<EOF
+s sym.imp.strlen
+af
+afs
+EOF
+EXPECT=<<EOF
+size_t strlen (const char *s);
 EOF
 RUN
 

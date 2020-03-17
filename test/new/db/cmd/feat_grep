@@ -1,24 +1,20 @@
-NAME='?e ~'
+NAME=?e ~
 FILE=malloc://1024
-CMDS=<<EOF
-?e jeje~jojo
-EOF
+CMDS=?e jeje~jojo
 EXPECT=<<EOF
 EOF
 RUN
 
-NAME='?e \~'
+NAME=?e \~
 FILE=malloc://1024
-CMDS=<<EOF
-?e jeje\~jojo
-EOF
+CMDS=?e jeje\~jojo
 EXPECT=<<EOF
 jeje~jojo
 EOF
 RUN
 
 # Basic grep.
-NAME='px~:1[1]'
+NAME=px~:1[1]
 FILE=malloc://1024
 CMDS=<<EOF
 wx 10203040
@@ -29,7 +25,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='px~:1[1-3]'
+NAME=px~:1[1-3]
 FILE=malloc://1024
 CMDS=<<EOF
 wx 102030405060708090
@@ -40,7 +36,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='px~:1[1-]'
+NAME=px~:1[1-]
 FILE=malloc://1024
 CMDS=<<EOF
 wx 10203040506070809010203040506070
@@ -51,7 +47,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='px~?'
+NAME=px~?
 FILE=malloc://1024
 CMDS=<<EOF
 wx 10203040
@@ -63,50 +59,42 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='grep begin'
+NAME=grep begin
 FILE=malloc://1024
-CMDS=<<EOF
-i~^size
-EOF
+CMDS=i~^size
 EXPECT=<<EOF
 size     0x400
 EOF
 RUN
 
-NAME='grep end'
+NAME=grep end
 FILE=malloc://1024
-CMDS=<<EOF
-i~0x400$
-EOF
+CMDS=i~0x400$
 EXPECT=<<EOF
 size     0x400
 EOF
 RUN
 
 
-NAME='i;$s'
+NAME=i;$s
 FILE=malloc://1024
-CMDS=<<EOF
-?v `i~size[1]`-$s;?! ?e works
-EOF
+CMDS=?v `i~size[1]`-$s;?! ?e works
 EXPECT=<<EOF
 0x0
 works
 EOF
 RUN
 
-NAME='?e~[0]'
+NAME=?e~[0]
 FILE=malloc://1024
-CMDS=<<EOF
-?e 0x3~[0];?e 0x999~[0]
-EOF
+CMDS=?e 0x3~[0];?e 0x999~[0]
 EXPECT=<<EOF
 0x3
 0x999
 EOF
 RUN
 
-NAME='?e~[0]'
+NAME=?e~[0]
 FILE=malloc://1024
 CMDS=<<EOF
 ?e hello world~[0]
@@ -118,31 +106,25 @@ world
 EOF
 RUN
 
-NAME='px~:1[3,5,0-1]'
+NAME=px~:1[3,5,0-1]
 FILE=malloc://1024
-CMDS=<<EOF
-wx 102030405060708090;px~:1[3,5,0-1]
-EOF
+CMDS=wx 102030405060708090;px~:1[3,5,0-1]
 EXPECT=<<EOF
 0x00000000 1020 5060 9000
 EOF
 RUN
 
-NAME='px~[3,5,0-1]:1'
+NAME=px~[3,5,0-1]:1
 FILE=malloc://1024
-CMDS=<<EOF
-wx 102030405060708090;px~[3,5,0-1]:1
-EOF
+CMDS=wx 102030405060708090;px~[3,5,0-1]:1
 EXPECT=<<EOF
 0x00000000 1020 5060 9000
 EOF
 RUN
 
-NAME='px~[3,5,0-1]:0..3'
+NAME=px~[3,5,0-1]:0..3
 FILE=malloc://1024
-CMDS=<<EOF
-wx 102030405060708090;px~[3,5,0-1]:0..3
-EOF
+CMDS=wx 102030405060708090;px~[3,5,0-1]:0..3
 EXPECT=<<EOF
 - offset 0 2
 0x00000000 1020 5060 9000
@@ -150,17 +132,15 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='px~[3,5,0-1]:-16'
+NAME=px~[3,5,0-1]:-16
 FILE=malloc://1024
-CMDS=<<EOF
-wx 102030405060708090;px~[3,5,0-1]:-16
-EOF
+CMDS=wx 102030405060708090;px~[3,5,0-1]:-16
 EXPECT=<<EOF
 0x00000000 1020 5060 9000
 EOF
 RUN
 
-NAME='range'
+NAME=range
 FILE=malloc://1024
 CMDS=<<EOF
 i~:0
@@ -197,7 +177,7 @@ block    0x100
 EOF
 RUN
 
-NAME='multigrep'
+NAME=multigrep
 FILE=malloc://1024
 CMDS=<<EOF
 i~size~?
@@ -270,7 +250,7 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='count grep'
+NAME=count grep
 CMDS=<<EOF
 wx 10203040
 b 128
@@ -281,17 +261,15 @@ EXPECT=<<EOF
 EOF
 RUN
 
-NAME='escaped grep'
+NAME=escaped grep
 FILE=../bins/elf/crackme
-CMDS=<<EOF
-pd 40~0x004005fe
-EOF
+CMDS=pd 40~0x004005fe
 EXPECT=<<EOF
         `-> 0x004005fe      4883c408       add rsp, 8
 EOF
 RUN
 
-NAME='sort lines'
+NAME=sort lines
 CMDS=<<EOF
 ?e 3\n2\n4\n1~$
 ?e 3\n2\n4\n1~$!
@@ -305,5 +283,27 @@ EXPECT=<<EOF
 3
 2
 1
+EOF
+RUN
+
+NAME=escaped chars
+CMDS=<<EOF
+?e Hello\x40World~Hello\@
+?e Hello\x24World~Hello\@
+?e Hello\n\x23World~\#
+EOF
+EXPECT=<<EOF
+Hello@World
+#World
+EOF
+RUN
+
+NAME=escaped chars 2
+BROKEN=1
+CMDS=<<EOF
+?e Hello\n\x3bWorld~\;
+EOF
+EXPECT=<<EOF
+;World
 EOF
 RUN

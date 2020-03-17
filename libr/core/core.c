@@ -138,7 +138,7 @@ R_API ut64 r_core_get_asmqjmps(RCore *core, const char *str) {
 	if (core->is_asmqjmps_letter) {
 		int i, pos = 0;
 		int len = strlen (str);
-		for (i = 0; i < len - 1; ++i) {
+		for (i = 0; i < len - 1; i++) {
 			if (!isupper ((ut8)str[i])) {
 				return UT64_MAX;
 			}
@@ -394,9 +394,9 @@ static ut64 getref (RCore *core, int n, char t, int type) {
 	}
 #if FCN_OLD
 	if (t == 'r') {
-		list = r_anal_fcn_get_refs (core->anal, fcn);
+		list = r_anal_function_get_refs (fcn);
 	} else {
-		list = r_anal_fcn_get_xrefs (core->anal, fcn);
+		list = r_anal_function_get_xrefs (fcn);
 	}
 	r_list_foreach (list, iter, r) {
 		if (r->type == type) {
@@ -755,7 +755,9 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 			}
 			return 0LL;
 		case 'D': // $D
-			if (IS_DIGIT (str[2])) {
+			if (str[2] == 'B') { // $DD
+				return r_debug_get_baddr (core->dbg, NULL);
+			} else if (IS_DIGIT (str[2])) {
 				return getref (core, atoi (str + 2), 'r', R_ANAL_REF_TYPE_DATA);
 			} else {
 				RDebugMap *map;
@@ -812,7 +814,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 	default:
 		if (*str >= 'A') {
 			// NOTE: functions override flags
-			RAnalFunction *fcn = r_anal_fcn_find_name (core->anal, str);
+			RAnalFunction *fcn = r_anal_get_function_byname (core->anal, str);
 			if (fcn) {
 				if (ok) {
 					*ok = true;
@@ -903,7 +905,7 @@ static const char *radare_argv[] = {
 	"aaa", "aab", "aac", "aac*", "aad", "aae", "aaf", "aaF", "aaFa", "aai", "aaij", "aan", "aang", "aao", "aap",
 	"aar?", "aar", "aar*", "aarj", "aas", "aat", "aaT", "aau", "aav",
 	"a8", "ab", "abb",
-	"acl", "acll", "aclj", "acl*", "ac?", "ac", "ac-", "acn", "acv", "acv-", "acb", "acb-", "acm", "acm-", "acmn",
+	"acl", "acll", "aclj", "acl*", "ac?", "ac", "ac-", "acn", "acv", "acvf", "acv-", "acb", "acb-", "acm", "acm-", "acmn",
 	"aC?", "aC", "aCe", "ad", "ad4", "ad8", "adf", "adfg", "adt", "adk",
 	"ae?", "ae??", "ae", "aea", "aeA", "aeaf", "aeAf", "aeC", "aec?", "aec", "aecs", "aecc", "aecu", "aecue",
 	"aef", "aefa",
@@ -1261,7 +1263,7 @@ static void autocompleteFilename(RLineCompletion *completion, RLineBuffer *buf, 
 	if (!input) {
 		goto out;
 	}
-	const char *tinput = r_str_trim_ro (input);
+	const char *tinput = r_str_trim_head_ro (input);
 
 	autocomplete_process_path (completion, buf->data, tinput);
 
@@ -1422,7 +1424,7 @@ static void autocomplete_sdb (RCore *core, RLineCompletion *completion, const ch
 	char *cur_pos = NULL, *cur_cmd = NULL, *next_cmd = NULL;
 	char *temp_cmd = NULL, *temp_pos = NULL, *key = NULL;
 	if (pipe) {
-		str = r_str_trim_ro (pipe + 1);
+		str = r_str_trim_head_ro (pipe + 1);
 	}
 	lpath = r_str_new (str);
 	p1 = strchr (lpath, '/');
@@ -1555,7 +1557,7 @@ static void autocomplete_file(RLineCompletion *completion, const char *str) {
 	char *pipe = strchr (str, '>');
 
 	if (pipe) {
-		str = r_str_trim_ro (pipe + 1);
+		str = r_str_trim_head_ro (pipe + 1);
 	}
 	if (str && !*str) {
 		autocomplete_process_path (completion, str, "./");
@@ -1570,7 +1572,7 @@ static void autocomplete_ms_file(RCore* core, RLineCompletion *completion, const
 	char *pipe = strchr (str, '>');
 	char *path = (core->rfs && *(core->rfs->cwd)) ? *(core->rfs->cwd): "/";
 	if (pipe) {
-		str = r_str_trim_ro (pipe + 1);
+		str = r_str_trim_head_ro (pipe + 1);
 	}
 	if (str && !*str) {
 		autocomplete_ms_path (completion, core, str, path);
@@ -1654,7 +1656,7 @@ static bool find_autocomplete(RCore *core, RLineCompletion *completion, RLineBuf
 	char arg[256];
 	arg[0] = 0;
 	while (*p) {
-		const char* e = r_str_trim_wp (p);
+		const char* e = r_str_trim_head_wp (p);
 		if (!e || (e - p) >= 256 || e == p) {
 			return false;
 		}
@@ -1664,7 +1666,7 @@ static bool find_autocomplete(RCore *core, RLineCompletion *completion, RLineBuf
 		if (child && child->length < buf->length && p[child->length] == ' ') {
 			// if is spaced then i can provide the
 			// next subtree as suggestion..
-			p = r_str_trim_ro (p + child->length);
+			p = r_str_trim_head_ro (p + child->length);
 			if (child->type == R_CORE_AUTOCMPLT_OPTN) {
 				continue;
 			}
@@ -1758,7 +1760,7 @@ R_API void r_core_autocomplete(R_NULLABLE RCore *core, RLineCompletion *completi
 		autocompleteFilename (completion, buf, NULL, 1);
 	} else if (ptr && strchr (ptr + 1, ' ') && buf->data + buf->index >= ptr) {
 		int sdelta, n;
-		ptr = (char *)r_str_trim_ro (ptr + 1);
+		ptr = (char *)r_str_trim_head_ro (ptr + 1);
 		n = strlen (ptr);//(buf->data+sdelta);
 		sdelta = (int)(size_t)(ptr - buf->data);
 		r_flag_foreach_prefix (core->flags, buf->data + sdelta, n, add_argv, completion);
@@ -1997,9 +1999,9 @@ R_API int r_core_fgets(char *buf, int len) {
 	if (!ptr) {
 		return -1;
 	}
-	strncpy (buf, ptr, len);
+	strncpy (buf, ptr, len - 1);
 	buf[len - 1] = 0;
-	return strlen (buf) + 1;
+	return strlen (buf);
 }
 
 static const char *r_core_print_offname(void *p, ut64 addr) {
@@ -2626,6 +2628,7 @@ R_API bool r_core_init(RCore *core) {
 	core->vmode = false;
 	core->printidx = 0;
 	core->lastcmd = NULL;
+	core->cmdlog = NULL;
 	core->stkcmd = NULL;
 	core->cmdqueue = NULL;
 	core->cmdrepeat = true;
@@ -3474,7 +3477,7 @@ R_API char *r_core_editor(const RCore *core, const char *file, const char *str) 
 	const bool interactive = r_cons_is_interactive ();
 	const char *editor = r_config_get (core->config, "cfg.editor");
 	char *name = NULL, *ret = NULL;
-	int len, fd;
+	int fd;
 
 	if (!interactive || !editor || !*editor) {
 		return NULL;
@@ -3514,6 +3517,7 @@ R_API char *r_core_editor(const RCore *core, const char *file, const char *str) 
 			r_sys_cmdf ("%s '%s'", editor, name);
 		}
 	}
+	size_t len = 0;
 	ret = name? r_file_slurp (name, &len): 0;
 	if (ret) {
 		if (len && ret[len - 1] == '\n') {
@@ -3641,7 +3645,7 @@ R_API void r_core_autocomplete_free(RCoreAutocomplete *obj) {
 		return;
 	}
 	int i;
-	for (i = 0; i < obj->n_subcmds; ++i) {
+	for (i = 0; i < obj->n_subcmds; i++) {
 		r_core_autocomplete_free (obj->subcmds[i]);
 		obj->subcmds[i] = NULL;
 	}
@@ -3656,7 +3660,7 @@ R_API RCoreAutocomplete *r_core_autocomplete_find(RCoreAutocomplete *parent, con
 	}
 	int len = strlen (cmd);
 	int i;
-	for (i = 0; i < parent->n_subcmds; ++i) {
+	for (i = 0; i < parent->n_subcmds; i++) {
 		if (exact && len == parent->subcmds[i]->length && !strncmp (cmd, parent->subcmds[i]->cmd, len)) {
 			return parent->subcmds[i];
 		} else if (!exact && !strncmp (cmd, parent->subcmds[i]->cmd, len)) {
@@ -3678,7 +3682,7 @@ R_API bool r_core_autocomplete_remove(RCoreAutocomplete *parent, const char* cmd
 		}
 		// if (!strncmp (parent->subcmds[i]->cmd, cmd, parent->subcmds[i]->length)) {
 		if (r_str_glob (ac->cmd, cmd)) {
-			for (j = i + 1; j < parent->n_subcmds; ++j) {
+			for (j = i + 1; j < parent->n_subcmds; j++) {
 				parent->subcmds[j - 1] = parent->subcmds[j];
 				parent->subcmds[j] = NULL;
 			}

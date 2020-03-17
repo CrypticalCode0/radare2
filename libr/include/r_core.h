@@ -398,7 +398,6 @@ R_API int r_core_lines_initcache (RCore *core, ut64 start_addr, ut64 end_addr);
 R_API int r_core_lines_currline (RCore *core);
 R_API void r_core_prompt_loop(RCore *core);
 R_API ut64 r_core_pava(RCore *core, ut64 addr);
-R_API void run_pending_anal(RCore *core);
 R_API int r_core_cmd(RCore *core, const char *cmd, int log);
 R_API int r_core_cmd_task_sync(RCore *core, const char *cmd, bool log);
 R_API char *r_core_editor (const RCore *core, const char *file, const char *str);
@@ -472,7 +471,7 @@ R_API void r_core_anal_paths(RCore *core, ut64 from, ut64 to, bool followCalls, 
 R_API void r_core_anal_esil_graph(RCore *core, const char *expr);
 
 R_API void r_core_list_io(RCore *core);
-R_API RListInfo *r_listinfo_new (char *name, RInterval pitv, RInterval vitv, int perm, char *extra);
+R_API RListInfo *r_listinfo_new (const char *name, RInterval pitv, RInterval vitv, int perm, const char *extra);
 R_API void r_listinfo_free (RListInfo *info);
 /* visual marks */
 R_API void r_core_visual_mark_seek(RCore *core, ut8 ch);
@@ -668,7 +667,6 @@ R_API ut64 r_core_bin_impaddr(RBin *bin, int va, const char *name);
 
 // XXX - this is kinda hacky, maybe there should be a way to
 // refresh the bin environment without specific calls?
-R_API int r_core_bin_refresh_strings(RCore *core);
 R_API int r_core_pseudo_code (RCore *core, const char *input);
 
 /* gdiff.c */
@@ -717,6 +715,7 @@ R_API void r_core_recover_vars(RCore *core, RAnalFunction *fcn, bool argonly);
 #define R_CORE_BIN_ACC_SOURCE 0x800000
 #define R_CORE_BIN_ACC_HASHES 0x10000000
 #define R_CORE_BIN_ACC_TRYCATCH 0x20000000
+#define R_CORE_BIN_ACC_SECTIONS_MAPPING 0x40000000
 #define R_CORE_BIN_ACC_ALL	0x504FFF
 
 #define R_CORE_PRJ_FLAGS	0x0001

@@ -360,7 +360,7 @@ R_API int r_main_ragg2(int argc, char **argv) {
 		if (!strcmp (file, "-")) {
 			char buf[1024];
 			for (;;) {
-				if (!fgets (buf, sizeof (buf) - 1, stdin)) {
+				if (!fgets (buf, sizeof (buf), stdin)) {
 					break;
 				}
 				if (feof (stdin)) {
@@ -378,10 +378,10 @@ R_API int r_main_ragg2(int argc, char **argv) {
 				goto fail;
 			}
 
-			int l;
+			size_t l;
 			char *buf = r_file_slurp (textFile, &l);
 			if (buf && l > 0) {
-				r_egg_raw (egg, (const ut8*)buf, l);
+				r_egg_raw (egg, (const ut8*)buf, (int)l);
 			} else {
 				eprintf ("Error loading '%s'\n", textFile);
 			}
@@ -423,10 +423,10 @@ R_API int r_main_ragg2(int argc, char **argv) {
 
 	// add raw file
 	if (contents) {
-		int l;
+		size_t l;
 		char *buf = r_file_slurp (contents, &l);
 		if (buf && l > 0) {
-			r_egg_raw (egg, (const ut8*)buf, l);
+			r_egg_raw (egg, (const ut8*)buf, (int)l);
 		} else {
 			eprintf ("Error loading '%s'\n", contents);
 		}

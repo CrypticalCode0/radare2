@@ -625,7 +625,7 @@ static struct r_bin_pe_export_t* parse_symbol_table(struct PE_(r_bin_pe_obj_t)* 
 	struct r_bin_pe_export_t* new_exports = NULL;
 	const size_t export_t_sz = sizeof (struct r_bin_pe_export_t);
 	int bufsz, i, shsz;
-	SymbolRecord* sr;
+	SymbolRecord sr;
 	ut64 text_off = 0LL;
 	ut64 text_rva = 0LL;
 	int textn = 0;
@@ -677,19 +677,23 @@ static struct r_bin_pe_export_t* parse_symbol_table(struct PE_(r_bin_pe_obj_t)* 
 	symctr = 0;
 	if (r_buf_read_at (bin->b, sym_tbl_off, (ut8*) buf, bufsz) > 0) {
 		for (i = 0; i < shsz; i += srsz) {
-			sr = (SymbolRecord*) (buf + i);
-			//bprintf ("SECNUM %d\n", sr->secnum);
-			if (sr->secnum == textn) {
-				if (sr->symtype == 32) {
+			// sr = (SymbolRecord*) (buf + i);
+			if (i + sizeof (sr) >= bufsz) {
+				break;
+			}
+			memcpy (&sr, buf + i, sizeof (sr));
+			//bprintf ("SECNUM %d\n", sr.secnum);
+			if (sr.secnum == textn) {
+				if (sr.symtype == 32) {
 					char shortname[9];
-					memcpy (shortname, &sr->shortname, 8);
+					memcpy (shortname, &sr.shortname, 8);
 					shortname[8] = 0;
 					if (*shortname) {
 						strncpy ((char*) exp[symctr].name, shortname, PE_NAME_LENGTH - 1);
 					} else {
 						char* longname, name[128];
-						ut32* idx = (ut32*) (buf + i + 4);
-						if (r_buf_read_at (bin->b, sym_tbl_off + *idx + shsz, (ut8*) name, 128)) { // == 128) {
+						ut32 idx = r_read_le32 (buf + i + 4);
+						if (r_buf_read_at (bin->b, sym_tbl_off + idx + shsz, (ut8*) name, 128)) { // == 128) {
 							longname = name;
 							name[sizeof(name) - 1] = 0;
 							strncpy ((char*) exp[symctr].name, longname, PE_NAME_LENGTH - 1);
@@ -699,8 +703,8 @@ static struct r_bin_pe_export_t* parse_symbol_table(struct PE_(r_bin_pe_obj_t)* 
 					}
 					exp[symctr].name[PE_NAME_LENGTH] = '\0';
 					exp[symctr].libname[0] = '\0';
-					exp[symctr].vaddr = bin_pe_rva_to_va (bin, text_rva + sr->value);
-					exp[symctr].paddr = text_off + sr->value;
+					exp[symctr].vaddr = bin_pe_rva_to_va (bin, text_rva + sr.value);
+					exp[symctr].paddr = text_off + sr.value;
 					exp[symctr].ordinal = symctr;
 					exp[symctr].forwarder[0] = 0;
 					exp[symctr].last = 0;
@@ -852,13 +856,15 @@ const char* PE_(bin_pe_compute_authentihash)(struct PE_(r_bin_pe_obj_t)* bin) {
 		return NULL;
 	}
 
-	const char *hashtype = bin->spcinfo->messageDigest.digestAlgorithm.algorithm->string;
+	char *hashtype = strdup (bin->spcinfo->messageDigest.digestAlgorithm.algorithm->string);
+	r_str_replace_char (hashtype, '-', 0);
 	ut64 algobit = r_hash_name_to_bits (hashtype);
-	if (!(algobit & (R_HASH_MD5 | R_HASH_SHA1))) {
-		eprintf ("Authenticode only supports md5, sha1.\n");
+	if (!(algobit & (R_HASH_MD5 | R_HASH_SHA1 | R_HASH_SHA256))) {
+		eprintf ("Authenticode only supports md5, sha1, sha256. This PE uses %s\n", hashtype);
+		free (hashtype);
 		return NULL;
 	}
-
+	free (hashtype);
 	ut32 checksum_paddr = bin->nt_header_offset + 4 + sizeof (PE_(image_file_header)) + 0x40;
 	ut32 security_entry_offset =  bin->nt_header_offset + sizeof (PE_(image_nt_headers)) - 96;
 	PE_(image_data_directory) *data_dir_security = &bin->data_directory[PE_IMAGE_DIRECTORY_ENTRY_SECURITY];
@@ -881,13 +887,14 @@ const char* PE_(bin_pe_compute_authentihash)(struct PE_(r_bin_pe_obj_t)* bin) {
 	const ut8 *data = r_buf_data (buf, &len);
 	char *hashstr = NULL;
 	RHash *ctx = r_hash_new (true, algobit);
-	r_hash_do_begin (ctx, algobit);
-	int digest_size = r_hash_calculate (ctx, algobit, data, len);
-	r_hash_do_end (ctx, algobit);
-	hashstr = r_hex_bin2strdup (ctx->digest, digest_size);
-
-	r_buf_free (buf);
-	r_hash_free (ctx);
+	if (ctx) {
+		r_hash_do_begin (ctx, algobit);
+		int digest_size = r_hash_calculate (ctx, algobit, data, len);
+		r_hash_do_end (ctx, algobit);
+		hashstr = r_hex_bin2strdup (ctx->digest, digest_size);
+		r_buf_free (buf);
+		r_hash_free (ctx);
+	}
 	return hashstr;
 }
 
@@ -1629,7 +1636,7 @@ static String* Pe_r_bin_pe_parse_string(struct PE_(r_bin_pe_obj_t)* bin, PE_DWor
 		goto out_error;
 	}
 
-	for (i = 0; *curAddr < begAddr + string->wLength; ++i, *curAddr += sizeof (ut16)) {
+	for (i = 0; *curAddr < begAddr + string->wLength; i++, *curAddr += sizeof (ut16)) {
 		ut16 utf16_char;
 		ut16 *tmpKey;
 		if (*curAddr > bin->size || *curAddr + sizeof (ut16) > bin->size) {
@@ -3964,13 +3971,15 @@ void* PE_(r_bin_pe_free)(struct PE_(r_bin_pe_obj_t)* bin) {
 }
 
 struct PE_(r_bin_pe_obj_t)* PE_(r_bin_pe_new)(const char* file, bool verbose) {
-	ut8* buf;
 	struct PE_(r_bin_pe_obj_t)* bin = R_NEW0 (struct PE_(r_bin_pe_obj_t));
 	if (!bin) {
 		return NULL;
 	}
 	bin->file = file;
-	if (!(buf = (ut8*) r_file_slurp (file, &bin->size))) {
+	size_t binsz;
+	ut8 *buf = (ut8*)r_file_slurp (file, &binsz);
+	bin->size = binsz;
+	if (!buf) {
 		return PE_(r_bin_pe_free)(bin);
 	}
 	bin->b = r_buf_new ();

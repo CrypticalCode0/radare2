@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2019 - pancake, thestr4ng3r */
+/* radare - LGPL - Copyright 2019-2020 - pancake, thestr4ng3r */
 
 #include <r_anal.h>
 
@@ -38,7 +38,6 @@ R_API void r_anal_block_ref(RAnalBlock *bb) {
 	assert (bb->ref > 0); // 0-refd must already be freed.
 	bb->ref++;
 }
-
 
 #define DFLT_NINSTR 3
 
@@ -84,10 +83,7 @@ void __block_free_rb(RBNode *node, void *user) {
 
 R_API RAnalBlock *r_anal_get_block_at(RAnal *anal, ut64 addr) {
 	RBNode *node = r_rbtree_find (anal->bb_tree, &addr, __bb_addr_cmp, NULL);
-	if (!node) {
-		return NULL;
-	}
-	return unwrap (node);
+	return node? unwrap (node): NULL;
 }
 
 // This is a special case of what r_interval_node_all_in() does
@@ -130,10 +126,9 @@ static bool block_list_cb(RAnalBlock *block, void *user) {
 
 R_API RList *r_anal_get_blocks_in(RAnal *anal, ut64 addr) {
 	RList *list = r_list_newf ((RListFree)r_anal_block_unref);
-	if (!list) {
-		return NULL;
+	if (list) {
+		r_anal_blocks_foreach_in (anal, addr, block_list_cb, list);
 	}
-	r_anal_blocks_foreach_in (anal, addr, block_list_cb, list);
 	return list;
 }
 
@@ -283,7 +278,7 @@ R_API RAnalBlock *r_anal_block_split(RAnalBlock *bbi, ut64 addr) {
 	RListIter *iter;
 	RAnalFunction *fcn;
 	r_list_foreach (bbi->fcns, iter, fcn) {
-			r_anal_function_add_block (fcn, bb);
+		r_anal_function_add_block (fcn, bb);
 	}
 
 	// recalculate offset of instructions in both bb and bbi
@@ -453,9 +448,98 @@ static bool recurse_list_cb(RAnalBlock *block, void *user) {
 
 R_API RList *r_anal_block_recurse_list(RAnalBlock *block) {
 	RList *ret = r_list_newf ((RListFree)r_anal_block_unref);
-	if (!ret) {
-		return NULL;
+	if (ret) {
+		r_anal_block_recurse (block, recurse_list_cb, ret);
 	}
-	r_anal_block_recurse (block, recurse_list_cb, ret);
 	return ret;
 }
+
+R_API void r_anal_block_add_switch_case(RAnalBlock *block, ut64 switch_addr, ut64 case_addr) {
+	if (!block->switch_op) {
+		block->switch_op = r_anal_switch_op_new (switch_addr, 0, 0, 0);
+	}
+	r_anal_switch_op_add_case (block->switch_op, case_addr, 0, case_addr);
+}
+
+
+typedef struct {
+	RAnal *anal;
+	RAnalBlock *cur_parent;
+	ut64 dst;
+	RPVector/*<RAnalBlock>*/ *next_visit; // accumulate block of the next level in the tree
+	HtUP/*<RAnalBlock>*/ *visited; // maps addrs to their previous block (or NULL for entry)
+} PathContext;
+
+static bool shortest_path_successor_cb(ut64 addr, void *user) {
+	PathContext *ctx = user;
+	if (ht_up_find_kv (ctx->visited, addr, NULL)) {
+		// already visited
+		return true;
+	}
+	ht_up_insert (ctx->visited, addr, ctx->cur_parent);
+	RAnalBlock *block = r_anal_get_block_at (ctx->anal, addr);
+	if (block) {
+		r_pvector_push (ctx->next_visit, block);
+	}
+	return addr != ctx->dst; // break if we found our destination
+}
+
+
+R_API R_NULLABLE RList/*<RAnalBlock *>*/ *r_anal_block_shortest_path(RAnalBlock *block, ut64 dst) {
+	RList *ret = NULL;
+	PathContext ctx;
+	ctx.anal = block->anal;
+	ctx.dst = dst;
+
+	// two vectors to swap cur_visit/next_visit
+	RPVector visit_a;
+	r_pvector_init (&visit_a, NULL);
+	RPVector visit_b;
+	r_pvector_init (&visit_b, NULL);
+	ctx.next_visit = &visit_a;
+	RPVector *cur_visit = &visit_b; // cur visit is the current level in the tree
+
+	ctx.visited = ht_up_new0 ();
+	if (!ctx.visited) {
+		goto beach;
+	}
+
+	ht_up_insert (ctx.visited, block->addr, NULL);
+	r_pvector_push (cur_visit, block);
+
+	// BFS
+	while (!r_pvector_empty (cur_visit)) {
+		void **it;
+		r_pvector_foreach (cur_visit, it) {
+			RAnalBlock *cur = *it;
+			ctx.cur_parent = cur;
+			r_anal_block_successor_addrs_foreach (cur, shortest_path_successor_cb, &ctx);
+		}
+		RPVector *tmp = cur_visit;
+		cur_visit = ctx.next_visit;
+		ctx.next_visit = tmp;
+		r_pvector_clear (ctx.next_visit);
+	}
+
+	// reconstruct the path
+	bool found = false;
+	RAnalBlock *prev = ht_up_find (ctx.visited, dst, &found);
+	RAnalBlock *dst_block = r_anal_get_block_at (block->anal, dst);
+	if (found && dst_block) {
+		ret = r_list_newf ((RListFree)r_anal_block_unref);
+		r_anal_block_ref (dst_block);
+		r_list_prepend (ret, dst_block);
+		while (prev) {
+			r_anal_block_ref (prev);
+			r_list_prepend (ret, prev);
+			prev = ht_up_find (ctx.visited, prev->addr, NULL);
+		}
+	}
+
+beach:
+	ht_up_free (ctx.visited);
+	r_pvector_clear (&visit_a);
+	r_pvector_clear (&visit_b);
+	return ret;
+}
+

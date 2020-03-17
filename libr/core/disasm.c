@@ -391,7 +391,7 @@ static void ds_print_ref_lines(char *line, char *line_col, RDisasmState *ds) {
 			}
 		} else {
 			len = strlen (line);
-			for (i = 0; i < len; ++i) {
+			for (i = 0; i < len; i++) {
 				r_cons_printf ("%s", get_utf8_char (line[i], ds));
 			}
 		}
@@ -1773,12 +1773,18 @@ static void printVarSummary(RDisasmState *ds, RList *list) {
 	ds_newline (ds);
 }
 
+static bool empty_signature(const char *s) {
+	if (s && !strncmp (s, "void ", 5) && strstr (s, "()")) {
+		return true;
+	}
+	return false;
+}
+
 static void ds_show_functions(RDisasmState *ds) {
 	RAnalFunction *f;
 	RCore *core = ds->core;
 	char *fcn_name;
 	bool fcn_name_alloc = false; // whether fcn_name needs to be freed by this function
-	char *sign;
 
 	if (!ds->show_functions) {
 		return;
@@ -1804,7 +1810,10 @@ static void ds_show_functions(RDisasmState *ds) {
 	}
 
 	ds_begin_line (ds);
-	sign = r_anal_fcn_to_string (core->anal, f);
+	char *sign = r_anal_function_get_signature (f);
+	if (empty_signature (sign)) {
+		R_FREE (sign);
+	}
 	if (f->type == R_ANAL_FCN_TYPE_LOC) {
 		r_cons_printf ("%s%s ", COLOR (ds, color_fline),
 			core->cons->vline[LINE_CROSS]); // |-
@@ -3716,10 +3725,10 @@ static void ds_print_asmop_payload(RDisasmState *ds, const ut8 *buf) {
 		if (ds->showpayloads) {
 			int mod = ds->asmop.payload % ds->core->assembler->dataalign;
 			int x;
-			for (x = 0; x < ds->asmop.payload; ++x) {
+			for (x = 0; x < ds->asmop.payload; x++) {
 				r_cons_printf ("\n        0x%02x", buf[ds->oplen + x]);
 			}
-			for (x = 0; x < mod; ++x) {
+			for (x = 0; x < mod; x++) {
 				r_cons_printf ("\n        0x%02x ; alignment", buf[ds->oplen + ds->asmop.payload + x]);
 			}
 		}
@@ -6524,6 +6533,7 @@ toro:
 					}
 					r_cons_println (opstr);
 				}
+				r_anal_op_fini (&analop);
 			} else {
 				char opstr[128] = {
 					0
