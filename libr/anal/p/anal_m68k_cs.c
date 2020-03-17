@@ -731,6 +731,7 @@ static int set_reg_profile(RAnal *anal) {
 			"fpu	fpsr	.32	198	0\n" //FPU Status reg
 			"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
 		case 68LC060: p =
+			break;
 		case 68EC060: p =
 			break;
 		case 68040: p =
@@ -746,23 +747,55 @@ static int set_reg_profile(RAnal *anal) {
 			"fpu	fpsr	.32	198	0\n" //FPU Status reg
 			"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
 		case 68LC040: p =
+			"priv	urp	.32	206	0\n"
+			"priv	srp	.32	210	0\n"
+			"priv	tc	.16	214	0\n"
+			"priv	dtt0	.32	216	0\n"
+			"priv	dtt1	.32	220	0\n"
+			"priv	itt0	.32	224	0\n"
+			"priv	itt1	.32	228	0\n"
+			"priv	mmusr	.16	232	0\n"
+			break;
 		case 68EC040: p =
-			break;	
+			break;
+		case 68EC030: p =
+			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
+			"priv	ac0	.32	210	0\n"
+			"priv	ac1	.32	214	0\n"
+			"priv	acusr	.16	218	0\n"
+			break;
 		case 68030: p =
 			"priv	tc	.32	206	0\n"
-			"priv	tt0	.32	210	0\n" 
-			"priv	tt1	.32	214	0\n" 
-			"priv	mmusr	.32	218	0\n"
-			"priv	urp	.64	222	0\n"
-			"priv	srp	.64	230	0\n";
+			"priv	tt0	.32	210	0\n"
+			"priv	tt1	.32	214	0\n"
+			"priv	mmusr	.16	218	0\n"
+			"priv	crp	.64	220	0\n"
+			"priv	srp	.64	228	0\n";
 		default: p =
 		case 68020: p =
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
 			break;
+		case 68EC030+FPU: p =
+			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
+			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
+			"fpu	fp1	.96	110	0\n" //FPU reg1, 96bits for write & read.
+			"fpu	fp2	.96	122	0\n" //FPU reg2, 96bits for write & read.
+			"fpu	fp3	.96	134	0\n" //FPU reg3, 96bits for write & read.
+			"fpu	fp4	.96	146	0\n" //FPU reg4, 96bits for write & read.
+			"fpu	fp5	.96	158	0\n" //FPU reg5, 96bits for write & read.
+			"fpu	fp6	.96	170	0\n" //FPU reg6, 96bits for write & read.
+			"fpu	fp7	.96	182	0\n" //FPU reg7, 96bits for write & read.
+			"fpu	fpcr	.32	194	0\n" //FPU Control reg
+			"fpu	fpsr	.32	198	0\n" //FPU Status reg
+			"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
+			"priv	ac0	.32	210	0\n"
+			"priv	ac1	.32	214	0\n"
+			"priv	acusr	.16	218	0\n"
+			break;
 		case 68030+FPU: p =
 			"priv	tc	.32	206	0\n"
-			"priv	tt0	.32	210	0\n" 
-			"priv	tt1	.32	214	0\n" 
+			"priv	tt0	.32	210	0\n"
+			"priv	tt1	.32	214	0\n"
 			"priv	mmusr	.32	218	0\n"
 			"priv	urp	.64	222	0\n"
 			"priv	srp	.64	230	0\n";
@@ -793,7 +826,7 @@ static int set_reg_profile(RAnal *anal) {
 	case 68000: p =
 		"=PC    pc\n"
 		"=SP    a7\n" //conditional, should be set either to USP, MSP, or ISP.
-		"=BP    a6\n" 
+		"=BP    a6\n"
 		"=A0    a0\n"
 		"=A1    a1\n"
 		"=A2    a2\n"
@@ -822,7 +855,7 @@ static int set_reg_profile(RAnal *anal) {
 		"gpr	a7 	.32	60	0\n"
 		"gpr	usp	.32	60	0\n" //usr stack ptr this is reg A7 during user mode.
 		"priv	msp	.32	64	0\n" //master stack ptr, this is reg A7 during supervisor mode.
-		"gpr	pc	.32	68	0\n" 
+		"gpr	pc	.32	68	0\n"
 		"priv	sr	.16	72	0\n" //available for read & write access during supervisor mode.
 		"gpr	ccr	.8	73	0\n" //subset of the SR, available during any mode.
 		"flg	x	.1	.579	0\n" //extended flag.
