@@ -859,6 +859,7 @@ R_API void r_core_link_stroff(RCore *core, RAnalFunction *fcn) {
 	r_anal_esil_setup (esil, core->anal, 0, 0, 0);
 	int i, ret, bsize = R_MAX (64, core->blocksize);
 	const int mininstrsz = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
+	const int maxinstrsz = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
 	const int minopcode = R_MAX (1, mininstrsz);
 	ut8 *buf = malloc (bsize);
 	if (!buf) {
@@ -887,7 +888,8 @@ R_API void r_core_link_stroff(RCore *core, RAnalFunction *fcn) {
 	r_config_set_i (core->config, "dbg.follow", 0);
 	ut64 oldoff = core->offset;
 	r_cons_break_push (NULL, NULL);
-	r_list_sort (fcn->bbs, bb_cmpaddr); // TODO: The algorithm can be more accurate if blocks are followed by their jmp/fail, not just by address
+	// TODO: The algorithm can be more accurate if blocks are followed by their jmp/fail, not just by address
+	r_list_sort (fcn->bbs, bb_cmpaddr);
 	r_list_foreach (fcn->bbs, it, bb) {
 		ut64 at = bb->addr;
 		ut64 to = bb->addr + bb->size;
@@ -899,7 +901,7 @@ R_API void r_core_link_stroff(RCore *core, RAnalFunction *fcn) {
 			if (at < bb->addr) {
 				break;
 			}
-			if (i >= (bsize - 32)) {
+			if (i >= (bsize - maxinstrsz)) {
 				i = 0;
 			}
 			if (!i) {
@@ -932,6 +934,11 @@ R_API void r_core_link_stroff(RCore *core, RAnalFunction *fcn) {
 				dst_imm = aop.dst->delta;
 			}
 			RAnalVar *var = aop.var;
+			if (false) { // src_addr != UT64_MAX || dst_addr != UT64_MAX) {
+			//  if (src_addr == UT64_MAX && dst_addr == UT64_MAX) {
+				r_anal_op_fini (&aop);
+				continue;
+			}
 			char *slink = r_type_link_at (TDB, src_addr);
 			char *vlink = r_type_link_at (TDB, src_addr + src_imm);
 			char *dlink = r_type_link_at (TDB, dst_addr);
@@ -1479,7 +1486,7 @@ static int cmd_type(void *data, const char *input) {
 		case ' ': {
 			char *type = strdup (input + 2);
 			char *ptr = strchr (type, '=');
-			ut64 addr;
+			ut64 addr = core->offset;
 
 			if (ptr) {
 				*ptr++ = 0;
@@ -1487,21 +1494,25 @@ static int cmd_type(void *data, const char *input) {
 				if (ptr && *ptr) {
 					addr = r_num_math (core->num, ptr);
 				} else {
-					eprintf ("address is unvalid\n");
+					eprintf ("tl: Address is unvalid\n");
 					free (type);
 					break;
 				}
-			} else {
-				addr = core->offset;
 			}
 			r_str_trim (type);
 			char *tmp = sdb_get (TDB, type, 0);
 			if (tmp && *tmp) {
 				r_type_set_link (TDB, type, addr);
-				RAnalFunction *fcn = r_anal_get_fcn_in (core->anal, core->offset, 0);
-				if (fcn) {
+				RList *fcns = r_anal_get_functions_in (core->anal, core->offset);
+				if (r_list_length (fcns) > 1) {
+					eprintf ("Multiple functions found in here.\n");
+				} else if (r_list_length (fcns) == 1) {
+					RAnalFunction *fcn = r_list_first (fcns);
 					r_core_link_stroff (core, fcn);
+				} else {
+					eprintf ("Cannot find any function here\n");
 				}
+				r_list_free (fcns);
 				free (tmp);
 			} else {
 				eprintf ("unknown type %s\n", type);
