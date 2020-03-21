@@ -719,9 +719,9 @@ fin:
 
 static int set_reg_profile(RAnal *anal) {
 	const char *p = \
-	switch (anal->cpu_curr_model){
+	switch (anal->cpu_model){
 	default: p =
-		switch (anal->cpu_curr_model){
+		switch (anal->cpu_model){
 		case 68060: p =
 			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
 			"fpu	fp1	.96	110	0\n" //FPU reg1, 96bits for write & read.
@@ -735,8 +735,16 @@ static int set_reg_profile(RAnal *anal) {
 			"fpu	fpsr	.32	198	0\n" //FPU Status reg
 			"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
 		case 68LC060: p =
-			break;
+			"priv	urp	.32	206	0\n"
+			"priv	srp	.32	210	0\n"
 		case 68EC060: p =
+			"priv	tc"
+			"priv	dtt0	.32	216	0\n"
+			"priv	dtt1	.32	220	0\n"
+			"priv	itt0	.32	224	0\n"
+			"priv	itt1	.32	228	0\n"
+			"priv	buscr	.32	232	0\n"
+			"priv	pcr	.32	236	0\n"
 			break;
 		case 68040: p =
 			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
@@ -753,14 +761,13 @@ static int set_reg_profile(RAnal *anal) {
 		case 68LC040: p =
 			"priv	urp	.32	206	0\n"
 			"priv	srp	.32	210	0\n"
+		case 68EC040: p =
 			"priv	tc	.16	214	0\n"
 			"priv	dtt0	.32	216	0\n"
 			"priv	dtt1	.32	220	0\n"
 			"priv	itt0	.32	224	0\n"
 			"priv	itt1	.32	228	0\n"
 			"priv	mmusr	.16	232	0\n"
-			break;
-		case 68EC040: p =
 			break;
 		case 68EC030: p =
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
@@ -775,7 +782,6 @@ static int set_reg_profile(RAnal *anal) {
 			"priv	mmusr	.16	218	0\n"
 			"priv	crp	.64	220	0\n"
 			"priv	srp	.64	228	0\n";
-		default: p =
 		case 68020: p =
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
 			break;
@@ -836,10 +842,10 @@ static int set_reg_profile(RAnal *anal) {
 		"=A3    a3\n"
 		"=A4	a4\n"
 		"=A5	a5\n"
-		"=ZF    z\n"
-		"=SF    n\n"
-		"=OF    v\n"
-		"=CF    c\n"
+		"=ZF    zf\n"
+		"=SF    nf\n"
+		"=OF    vf\n"
+		"=CF    cf\n"
 		"gpr	d0	.32	0	0\n"
 		"gpr	d1	.32	4	0\n"
 		"gpr	d2	.32	8	0\n"
@@ -860,12 +866,15 @@ static int set_reg_profile(RAnal *anal) {
 		"priv	msp	.32	64	0\n" //master stack ptr, this is reg A7 during supervisor mode.
 		"gpr	pc	.32	68	0\n"
 		"priv	sr	.16	72	0\n" //available for read & write access during supervisor mode.
-		"gpr	ccr	.8	73	0\n" //subset of the SR, available during any mode.
-		"flg	x	.1	.579	0\n" //extended flag.
-		"flg	n	.1	.580	0\n" //negative flag.
-		"flg	z	.1	.581	0\n" //zero flag.
-		"flg	v	.1	.582	0\n" //overflow flag.
-		"flg	c	.1	.583	0\n" //carry flag.
+		"priv	im	.3	.584	0\n" //Interrupt mask
+		"priv	ss	.1	.589	0\n" //Supervisor state flag, set during boot
+		"priv	t1	.1	.591	0\n" //Trace
+		"gpr	ccr	.8	72	0\n" //subset of the SR, available during any mode.
+		"flg	xf	.1	.580	0\n" //extended flag.
+		"flg	nf	.1	.579	0\n" //negative flag.
+		"flg	zf	.1	.578	0\n" //zero flag.
+		"flg	vf	.1	.577	0\n" //overflow flag.
+		"flg	cf	.1	.576	0\n" //carry flag.
 		break;
 	case 68881: p =
 	case 68882: p =
@@ -878,7 +887,42 @@ static int set_reg_profile(RAnal *anal) {
 		"fpu	fp6	.96	170	0\n" //FPU reg6, 96bits for write & read.
 		"fpu	fp7	.96	182	0\n" //FPU reg7, 96bits for write & read.
 		"fpu	fpcr	.32	194	0\n" //FPU Control reg
+		"fpu	mc	.8	194	0\n" //Mode Control
+		"fpu	rnd	.2	.1556	0\n" //Rounding, default is nearest.
+		"fpu	prec	.2	.1558	0\n" //Precision, default is extended.
+		"fpu	ee	.8	195	0\n" //Exception Enable
+		"fpu	inex1	.1	.1560	0\n" //Inexact Dec input
+		"fpu	inex2	.1	.1561	0\n" //Inexact Op
+		"fpu	dz	.1	.1562	0\n" //Divide by Zero
+		"fpu	unfl	.1	.1563	0\n" //UnderFlow
+		"fpu	ovfl	.1	.1564	0\n" //OverFlow
+		"fpu	operr	.1	.1565	0\n" //Op Error
+		"fpu	snan	.1	.1566	0\n" //Signalling Not a Number.
+		"fpu	bsun	.1	.1567	0\n" //Branch/Set on Unordered.
 		"fpu	fpsr	.32	198	0\n" //FPU Status reg
+		"fpu	ae	.8	198	0\n" //Accured Exception
+		"fpu	inex	.1	.1587	0\n" //Inexact
+		"fpu	dz	.1	.1588	0\n" //Divide by Zero
+		"fpu	unfl	.1	.1589	0\n" //UnderFlow
+		"fpu	ovfl	.1	.1590	0\n" //OverFlow
+		"fpu	iop	.1	.1591	0\n" //Invalid Op
+		"fpu	es	.8	199	0\n" //Exception Status
+		"fpu	inex1	.1	.1592	0\n" //Inexact Dec input
+		"fpu	inex2	.1	.1593	0\n" //Inexact Op
+		"fpu	dz	.1	.1594	0\n" //Divide by Zero
+		"fpu	unfl	.1	.1595	0\n" //UnderFlow
+		"fpu	ovfl	.1	.1596	0\n" //OverFlow
+		"fpu	operr	.1	.1597	0\n" //Op Error
+		"fpu	snan	.1	.1598	0\n" //Signalling Not a Number.
+		"fpu	bsun	.1	.1599	0\n" //Branch/Set on Unordered.
+		"fpu	qb	.8	200	0\n" //Quotient byte
+		"fpu	q	.7	.1600	0\n" //Quotient, least significant bits.
+		"fpu	s	.1	.1607	0\n" //Quotient, Sign.
+		"fpu	ccb	.8	201	0\n" //Condition Code byte
+		"fpu	nan	.1	.1608	0\n" //Not a Number
+		"fpu	i	.1	.1609	0\n" //Infinity
+		"fpu	z	.1	.1610	0\n" //Zero
+		"fpu	n	.1	.1611	0\n" //Negative
 		"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
 		break;
 	}
