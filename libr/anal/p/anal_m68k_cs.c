@@ -720,7 +720,6 @@ fin:
 static int set_reg_profile(RAnal *anal) {
 	const char *p = \
 	switch (anal->cpu_model){
-	default: p =
 		switch (anal->cpu_model){
 		case 68060: p =
 			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
@@ -761,13 +760,18 @@ static int set_reg_profile(RAnal *anal) {
 		case 68LC040: p =
 			"priv	urp	.32	206	0\n"
 			"priv	srp	.32	210	0\n"
-		case 68EC040: p =
 			"priv	tc	.16	214	0\n"
 			"priv	dtt0	.32	216	0\n"
 			"priv	dtt1	.32	220	0\n"
 			"priv	itt0	.32	224	0\n"
 			"priv	itt1	.32	228	0\n"
 			"priv	mmusr	.16	232	0\n"
+			break;
+		case 68EC040: p =
+			"priv	dacr0	.32	216	0\n"
+			"priv	dacr1	.32	220	0\n"
+			"priv	iacr0	.32	224	0\n"
+			"priv	iacr1	.32	228	0\n"
 			break;
 		case 68EC030: p =
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
@@ -824,13 +828,16 @@ static int set_reg_profile(RAnal *anal) {
 			"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
 			break;
 		}
-		"priv	isp	.32	86	0\n" //interrupt stack ptr, this is reg A7 at start of interrrupts. handling.
-		"priv	cacr	.32	90	0\n" //cache ctrl reg, implementation specific
+		"priv	ms	.1	.588	0\n" //Master state flag.
+		"priv	t0	.1	.590	0\n" //Trace 0, if set trace on change of flow.
+		"priv	msp	.32	86	0\n" //Master stack ptr.
+		"priv	cacr	.32	90	0\n" //Cache ctrl reg, implementation specific
 	case cpu32: p =
 	case 68010: p =
 		"priv	vbr	.32	74	0\n" //vector base reg, this is a ptr to the exception table.
 		"priv	sfc	.32	78	0\n" //src fun code reg, top 29bit read NULL.
 		"priv	dfc	.32	82	0\n" //dst fun code reg, top 29bit read NULL.
+	default: p =
 	case 68008: p =
 	case 68000: p =
 		"=PC    pc\n"
@@ -863,12 +870,12 @@ static int set_reg_profile(RAnal *anal) {
 		"gpr	a6 	.32	56	0\n"
 		"gpr	a7 	.32	60	0\n"
 		"gpr	usp	.32	60	0\n" //usr stack ptr this is reg A7 during user mode.
-		"priv	msp	.32	64	0\n" //master stack ptr, this is reg A7 during supervisor mode.
+		"priv	ssp	.32	64	0\n" //Supervisor stack ptr, this is reg A7 during supervisor mode.
 		"gpr	pc	.32	68	0\n"
 		"priv	sr	.16	72	0\n" //available for read & write access during supervisor mode.
 		"priv	im	.3	.584	0\n" //Interrupt mask
 		"priv	ss	.1	.589	0\n" //Supervisor state flag, set during boot
-		"priv	t1	.1	.591	0\n" //Trace
+		"priv	t1	.1	.591	0\n" //Trace 1, if set trace on any instruction
 		"gpr	ccr	.8	72	0\n" //subset of the SR, available during any mode.
 		"flg	xf	.1	.580	0\n" //extended flag.
 		"flg	nf	.1	.579	0\n" //negative flag.
@@ -916,13 +923,13 @@ static int set_reg_profile(RAnal *anal) {
 		"fpu	snan	.1	.1598	0\n" //Signalling Not a Number.
 		"fpu	bsun	.1	.1599	0\n" //Branch/Set on Unordered.
 		"fpu	qb	.8	200	0\n" //Quotient byte
-		"fpu	q	.7	.1600	0\n" //Quotient, least significant bits.
-		"fpu	s	.1	.1607	0\n" //Quotient, Sign.
+		"fpu	ql	.7	.1600	0\n" //Quotient, least significant bits.
+		"fpu	qs	.1	.1607	0\n" //Quotient, Sign.
 		"fpu	ccb	.8	201	0\n" //Condition Code byte
 		"fpu	nan	.1	.1608	0\n" //Not a Number
-		"fpu	i	.1	.1609	0\n" //Infinity
-		"fpu	z	.1	.1610	0\n" //Zero
-		"fpu	n	.1	.1611	0\n" //Negative
+		"fpu	in	.1	.1609	0\n" //Infinity
+		"fpu	ze	.1	.1610	0\n" //Zero
+		"fpu	ne	.1	.1611	0\n" //Negative
 		"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
 		break;
 	}
