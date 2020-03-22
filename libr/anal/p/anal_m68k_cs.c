@@ -734,16 +734,16 @@ static int set_reg_profile(RAnal *anal) {
 			"fpu	fpsr	.32	198	0\n" //FPU Status reg
 			"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
 		case 68LC060: p = //without FPU
-			"priv	urp	.32	206	0\n"
-			"priv	srp	.32	210	0\n"
+			"priv	urp	.32	220	0\n"
+			"priv	srp	.32	228	0\n"
 		case 68EC060: p = //without FPU and MMU
-			"priv	tc	.16	214	0\n" //do not use will write without error but does not guaranty you recieve sane values when read.
-			"priv	dtt0	.32	216	0\n"
-			"priv	dtt1	.32	220	0\n"
+			"priv	tc	.16	206	0\n"
+			"priv	dtt0	.32	210	0\n"
+			"priv	dtt1	.32	214	0\n"
 			"priv	itt0	.32	224	0\n"
-			"priv	itt1	.32	228	0\n"
-			"priv	buscr	.32	232	0\n"
-			"priv	pcr	.32	236	0\n"
+			"priv	itt1	.32	232	0\n"
+			"priv	buscr	.32	236	0\n"
+			"priv	pcr	.32	240	0\n"
 			break;
 		case 68040: p =
 			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
@@ -758,20 +758,20 @@ static int set_reg_profile(RAnal *anal) {
 			"fpu	fpsr	.32	198	0\n" //FPU Status reg
 			"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
 		case 68LC040: p = //without FPU
-			"priv	urp	.32	206	0\n"
-			"priv	srp	.32	210	0\n"
-			"priv	tc	.16	214	0\n"
-			"priv	dtt0	.32	216	0\n"
-			"priv	dtt1	.32	220	0\n"
+			"priv	urp	.32	220	0\n"
+			"priv	srp	.32	228	0\n"
+			"priv	tc	.16	206	0\n"
+			"priv	dtt0	.32	210	0\n"
+			"priv	dtt1	.32	214	0\n"
 			"priv	itt0	.32	224	0\n"
-			"priv	itt1	.32	228	0\n"
-			"priv	mmusr	.16	232	0\n"
+			"priv	itt1	.32	232	0\n"
+			"priv	mmusr	.16	218	0\n"
 			break;
 		case 68EC040: p = //without FPU and MMU
-			"priv	dacr0	.32	216	0\n"
-			"priv	dacr1	.32	220	0\n"
+			"priv	dacr0	.32	210	0\n"
+			"priv	dacr1	.32	216	0\n"
 			"priv	iacr0	.32	224	0\n"
-			"priv	iacr1	.32	228	0\n"
+			"priv	iacr1	.32	232	0\n"
 			break;
 		case 68EC030: p = //without MMU
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
@@ -810,9 +810,9 @@ static int set_reg_profile(RAnal *anal) {
 			"priv	tc	.32	206	0\n"
 			"priv	tt0	.32	210	0\n"
 			"priv	tt1	.32	214	0\n"
-			"priv	mmusr	.32	218	0\n"
-			"priv	urp	.64	222	0\n"
-			"priv	srp	.64	230	0\n";
+			"priv	mmusr	.16	218	0\n"
+			"priv	crp	.64	220	0\n"
+			"priv	srp	.64	228	0\n";
 		case 68020+FPU: p = //without MMU
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
 			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
@@ -931,6 +931,18 @@ static int set_reg_profile(RAnal *anal) {
 		"fpu	ze	.1	.1610	0\n" //Zero
 		"fpu	ne	.1	.1611	0\n" //Negative
 		"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
+		break;
+	case 68851: p =	//MMU
+		"priv	tc	.32	206	0\n"
+		"priv	ac	.16	210	0\n"
+		"priv	pcsr	.16	212	0\n"
+		"priv	cal	.8	214	0\n"
+		"priv	scc	.8	215	0\n"
+		"priv	val	.8	216	0\n"
+		"priv	pmmusr	.16	218	0\n"
+		"priv	crp	.64	220	0\n"
+		"priv	srp	.64	228	0\n"
+		"priv	drp	.64	236	0\n"
 		break;
 	}
 	return r_reg_set_profile_string (anal->reg, p);
