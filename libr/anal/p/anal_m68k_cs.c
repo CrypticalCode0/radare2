@@ -719,8 +719,8 @@ fin:
 
 static int set_reg_profile(RAnal *anal) {
 	const char *p = \
-	switch (anal->cpu_model){
-		switch (anal->cpu_model){
+	switch (anal->cpu_model) {
+		switch (anal->cpu_model) {
 		case 68060: p =
 			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
 			"fpu	fp1	.96	110	0\n" //FPU reg1, 96bits for write & read.
@@ -733,11 +733,11 @@ static int set_reg_profile(RAnal *anal) {
 			"fpu	fpcr	.32	194	0\n" //FPU Control reg
 			"fpu	fpsr	.32	198	0\n" //FPU Status reg
 			"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
-		case 68LC060: p =
+		case 68LC060: p = //without FPU
 			"priv	urp	.32	206	0\n"
 			"priv	srp	.32	210	0\n"
-		case 68EC060: p =
-			"priv	tc"
+		case 68EC060: p = //without FPU and MMU
+			"priv	tc	.16	214	0\n" //do not use will write without error but does not guaranty you recieve sane values when read.
 			"priv	dtt0	.32	216	0\n"
 			"priv	dtt1	.32	220	0\n"
 			"priv	itt0	.32	224	0\n"
@@ -757,7 +757,7 @@ static int set_reg_profile(RAnal *anal) {
 			"fpu	fpcr	.32	194	0\n" //FPU Control reg
 			"fpu	fpsr	.32	198	0\n" //FPU Status reg
 			"fpu	fpiar	.32	202	0\n" //FPU Instruction Address reg.
-		case 68LC040: p =
+		case 68LC040: p = //without FPU
 			"priv	urp	.32	206	0\n"
 			"priv	srp	.32	210	0\n"
 			"priv	tc	.16	214	0\n"
@@ -767,29 +767,29 @@ static int set_reg_profile(RAnal *anal) {
 			"priv	itt1	.32	228	0\n"
 			"priv	mmusr	.16	232	0\n"
 			break;
-		case 68EC040: p =
+		case 68EC040: p = //without FPU and MMU
 			"priv	dacr0	.32	216	0\n"
 			"priv	dacr1	.32	220	0\n"
 			"priv	iacr0	.32	224	0\n"
 			"priv	iacr1	.32	228	0\n"
 			break;
-		case 68EC030: p =
+		case 68EC030: p = //without MMU
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
 			"priv	ac0	.32	210	0\n"
 			"priv	ac1	.32	214	0\n"
 			"priv	acusr	.16	218	0\n"
 			break;
-		case 68030: p =
+		case 68030: p = //without FPU
 			"priv	tc	.32	206	0\n"
 			"priv	tt0	.32	210	0\n"
 			"priv	tt1	.32	214	0\n"
 			"priv	mmusr	.16	218	0\n"
 			"priv	crp	.64	220	0\n"
 			"priv	srp	.64	228	0\n";
-		case 68020: p =
+		case 68020: p = //without FPU and MMU
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
 			break;
-		case 68EC030+FPU: p =
+		case 68EC030+FPU: p = //without MMU
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
 			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
 			"fpu	fp1	.96	110	0\n" //FPU reg1, 96bits for write & read.
@@ -813,7 +813,7 @@ static int set_reg_profile(RAnal *anal) {
 			"priv	mmusr	.32	218	0\n"
 			"priv	urp	.64	222	0\n"
 			"priv	srp	.64	230	0\n";
-		case 68020+FPU: p =
+		case 68020+FPU: p = //without MMU
 			"priv	caar	.32	94	0\n" //cache addr reg, 68020, 68EC020, 68030 & 68EC030 only.
 			"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
 			"fpu	fp1	.96	110	0\n" //FPU reg1, 96bits for write & read.
@@ -832,14 +832,14 @@ static int set_reg_profile(RAnal *anal) {
 		"priv	t0	.1	.590	0\n" //Trace 0, if set trace on change of flow.
 		"priv	msp	.32	86	0\n" //Master stack ptr.
 		"priv	cacr	.32	90	0\n" //Cache ctrl reg, implementation specific
-	case cpu32: p =
+	case cpu32: p = //Embedded version, 683XX
 	case 68010: p =
 		"priv	vbr	.32	74	0\n" //vector base reg, this is a ptr to the exception table.
 		"priv	sfc	.32	78	0\n" //src fun code reg, top 29bit read NULL.
 		"priv	dfc	.32	82	0\n" //dst fun code reg, top 29bit read NULL.
 	default: p =
-	case 68008: p =
-	case 68000: p =
+	case 68008: p = //8-bit bus version
+	case 68000: p = //default, grandaddy of this family.
 		"=PC    pc\n"
 		"=SP    a7\n" //conditional, should be set either to USP, MSP, or ISP.
 		"=BP    a6\n"
@@ -883,8 +883,8 @@ static int set_reg_profile(RAnal *anal) {
 		"flg	vf	.1	.577	0\n" //overflow flag.
 		"flg	cf	.1	.576	0\n" //carry flag.
 		break;
-	case 68881: p =
-	case 68882: p =
+	case 68881: p = //FPU
+	case 68882: p = //the faster FPU
 		"fpu	fp0	.96	98	0\n" //FPU reg0, 96bits for write & read.
 		"fpu	fp1	.96	110	0\n" //FPU reg1, 96bits for write & read.
 		"fpu	fp2	.96	122	0\n" //FPU reg2, 96bits for write & read.
