@@ -841,6 +841,7 @@ static int set_reg_profile(RAnal *anal) {
 	case 68008: p = //8-bit bus version
 	case 68000: p = //default, grandaddy of this family.
 		"=PC    pc\n"
+		"=SR	sr\n" //Status Reg.
 		"=SP    a7\n" //conditional, should be set either to USP, MSP, or ISP.
 		"=BP    a6\n"
 		"=A0    a0\n"
